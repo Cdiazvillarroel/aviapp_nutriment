@@ -15,17 +15,24 @@ interface SidebarProps {
   todayVisitCount?: number;
 }
 
-const NAV_PRIMARY = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: (props: { size?: number }) => React.ReactElement;
+  soon?: boolean;
+};
+
+const NAV_PRIMARY: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: IconLayout },
   { href: "/farms",     label: "Farms",     icon: IconHome },
   { href: "/visits",    label: "Visits",    icon: IconClock },
   { href: "/scoring",   label: "Scoring",   icon: IconCheckSquare },
-] as const;
+];
 
-const NAV_INSIGHTS = [
+const NAV_INSIGHTS: NavItem[] = [
   { href: "/reports",    label: "Reports",    icon: IconReport },
   { href: "/benchmarks", label: "Benchmarks", icon: IconTrendUp, soon: true },
-] as const;
+];
 
 export function Sidebar({ userName, userRole, clientName, todayVisitCount }: SidebarProps) {
   const pathname = usePathname();
@@ -145,9 +152,8 @@ function NavLink({
 
   if (disabled) return <span className={className}>{children}</span>;
 
-  // Cast to any to satisfy typedRoutes — these are valid paths in the app.
   return (
-    <Link href={href as any} className={className}>
+    <Link href={href} className={className}>
       {children}
     </Link>
   );
