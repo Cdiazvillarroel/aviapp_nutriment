@@ -41,11 +41,11 @@
     --info:    #2f5e80;
     --info-bg: #e2ecf3;
 
-    /* Type stacks. The actual font files load from next/font in app/layout.tsx
-       and are bound to these CSS variables. */
-    --font-display: var(--font-fraunces), Georgia, serif;
-    --font-sans:    var(--font-geist), -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono:    var(--font-geist-mono), ui-monospace, monospace;
+    /* Type stacks. Fonts loaded via <link> in app/layout.tsx — see comment there. */
+    --font-display: "Fraunces", Georgia, serif;
+    --font-sans:    "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono:    "Geist Mono", ui-monospace, monospace;
+     
   }
 
   html, body {
