@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
@@ -12,7 +12,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
@@ -25,11 +25,8 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Refresh the user's session if it's expired.
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Redirect unauthenticated users to /login (except when already there
-  // or hitting the auth callback).
   const path = request.nextUrl.pathname;
   const isAuthRoute = path.startsWith("/login") || path.startsWith("/auth");
 
@@ -40,7 +37,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Send signed-in users away from /login.
   if (user && path === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
