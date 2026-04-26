@@ -1,43 +1,207 @@
-import { Topbar } from "@/components/ui/topbar";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { Topbar } from "@/components/ui/topbar";
+import { ScoringClient, type InitialScore } from "@/components/scoring/scoring-client";
+import { IconCheckSquare } from "@/components/ui/icons";
 
-export default function ScoringPage() {
-  return (
-    <>
-      <Topbar crumbs={[
-        { label: "Dashboard", href: "/dashboard" },
-        { label: "Scoring" },
-      ]} />
+export default async function ScoringPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ visit?: string }>;
+}) {
+  const { visit: visitId } = await searchParams;
 
-      <div className="w-full max-w-[1280px] px-8 pb-14 pt-7">
-        <div className="page-header">
-          <div>
-            <h1>Scoring</h1>
-            <div className="page-header__sub">Coming in the next iteration.</div>
-          </div>
-        </div>
+  const supabase = await createClient();
 
-        <div className="card">
-          <div className="card__body">
-            <div className="flex flex-col items-start gap-3 py-8">
-              <div className="font-display text-xl"
-                   style={{ fontVariationSettings: "'opsz' 48", color: "var(--text-2)" }}>
-                Scoring module
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: membership } = await supabase
+    .from("client_members")
+    .select("client_id")
+    .eq("user_id", user!.id)
+    .limit(1)
+    .single();
+
+  const clientId = membership!.client_id;
+
+  if (!visitId) {
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
+
+    const { data: candidates } = await supabase
+      .from("visits")
+      .select(`
+        id, scheduled_at, status,
+        farms(name)
+      `)
+      .eq("client_id", clientId)
+      .gte("scheduled_at", startOfDay.toISOString())
+      .lte("scheduled_at", endOfDay.toISOString())
+      .order("scheduled_at", { ascending: true });
+
+    return (
+      <>
+        <Topbar crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Scoring" }]} />
+
+        <div className="w-full max-w-[720px] px-8 pb-14 pt-7">
+          <div className="page-header">
+            <div>
+              <h1>Scoring</h1>
+              <div className="page-header__sub">
+                Open the scoring sheet from a visit to start recording.
               </div>
-              <p className="m-0 max-w-lg text-[13px]" style={{ color: "var(--text-2)" }}>
-                Pantalla central con captura de foto y AI scoring. Diferenciadores #1 y #2.
-              </p>
-              <p className="m-0 max-w-lg text-[13px]" style={{ color: "var(--text-3)" }}>
-                The HTML mockup at <code className="font-mono text-[12px]">scoring.html</code>
-                in the design package shows the target layout. The Supabase tables and RLS
-                policies needed are already created — only the UI is pending.
-              </p>
-              <Link href="/dashboard" className="btn btn--primary mt-2">
-                ← Back to dashboard
-              </Link>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card__header">
+              <h2 className="card__title">
+                <IconCheckSquare size={16} />
+                Today&apos;s visits
+              </h2>
+            </div>
+            <div className="card__body card__body--flush">
+              {(candidates ?? []).length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm" style={{ color: "var(--text-2)" }}>
+                  No visits scheduled for today.{" "}
+                  <Link href="/visits" style={{ color: "var(--green-700)" }}>Browse all visits →</Link>
+                </div>
+              ) : (
+                (candidates ?? []).map(v => {
+                  const farm = Array.isArray(v.farms) ? v.farms[0] : v.farms;
+                  const time = new Date(v.scheduled_at).toLocaleTimeString("en-AU", {
+                    hour: "2-digit", minute: "2-digit", hour12: false,
+                  });
+                  return (
+                    <Link
+                      key={v.id}
+                      href={`/scoring?visit=${v.id}`}
+                      className="grid items-center gap-3 border-b px-5 py-3.5 last:border-b-0 hover:bg-surface-2"
+                      style={{ borderColor: "var(--divider)", gridTemplateColumns: "60px 1fr auto" }}
+                    >
+                      <div className="font-mono text-[13px] font-medium">{time}</div>
+                      <div className="text-[13px]">{farm?.name ?? "Unknown"}</div>
+                      <span className={`pill ${
+                        v.status === "completed" ? "pill--ok" :
+                        v.status === "in_progress" ? "pill--warn" : ""
+                      }`}>
+                        {v.status.replace("_", " ")}
+                      </span>
+                    </Link>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
+      </>
+    );
+  }
+
+  const [visitRes, definitionsRes, scoresRes] = await Promise.all([
+    supabase
+      .from("visits")
+      .select(`
+        id, status,
+        farms(name),
+        visit_flocks(
+          flocks(id, reference, placement_date, houses(name))
+        )
+      `)
+      .eq("id", visitId)
+      .eq("client_id", clientId)
+      .maybeSingle(),
+
+    supabase
+      .from("scoring_definitions")
+      .select("id, section, name, scale_max, display_order")
+      .order("display_order"),
+
+    supabase
+      .from("visit_scores")
+      .select(`
+        id, score, notes, flock_id, definition_id,
+        photos(id, storage_path)
+      `)
+      .eq("visit_id", visitId),
+  ]);
+
+  if (!visitRes.data) {
+    return (
+      <>
+        <Topbar crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Scoring" }]} />
+        <div className="w-full max-w-[720px] px-8 pb-14 pt-7">
+          <div className="card">
+            <div className="card__body text-center" style={{ padding: 60 }}>
+              <p className="m-0 mb-4 text-[13px]" style={{ color: "var(--text-2)" }}>
+                Visit not found.
+              </p>
+              <Link href="/visits" className="btn btn--primary">All visits</Link>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const visit = visitRes.data;
+  const farm = Array.isArray(visit.farms) ? visit.farms[0] : visit.farms;
+  const definitions = definitionsRes.data ?? [];
+
+  const visitFlocks = Array.isArray(visit.visit_flocks) ? visit.visit_flocks : [];
+  const flocks = visitFlocks.map(vf => {
+    const fl = Array.isArray(vf.flocks) ? vf.flocks[0] : vf.flocks;
+    if (!fl) return null;
+    const house = Array.isArray(fl.houses) ? fl.houses[0] : fl.houses;
+    return {
+      id: fl.id,
+      reference: fl.reference,
+      house_name: house?.name ?? "—",
+      age_days: Math.round((Date.now() - new Date(fl.placement_date).getTime()) / 86_400_000),
+    };
+  }).filter((f): f is NonNullable<typeof f> => f !== null);
+
+  const rawScores = scoresRes.data ?? [];
+  const initialScores: InitialScore[] = await Promise.all(
+    rawScores.map(async (s) => {
+      const photoRows = Array.isArray(s.photos) ? s.photos : [];
+      const photos = await Promise.all(
+        photoRows.map(async (p) => {
+          const { data: signed } = await supabase.storage
+            .from("visit-photos")
+            .createSignedUrl(p.storage_path, 3600);
+          return { id: p.id, url: signed?.signedUrl ?? "" };
+        })
+      );
+      return {
+        flockId: s.flock_id ?? "",
+        definitionId: s.definition_id,
+        scoreId: s.id,
+        score: s.score,
+        notes: s.notes,
+        photos,
+      };
+    })
+  );
+
+  return (
+    <>
+      <Topbar
+        crumbs={[
+          { label: "Dashboard", href: "/dashboard" },
+          { label: "Visits", href: "/visits" },
+          { label: farm?.name ?? "Visit", href: `/visits/${visitId}` },
+          { label: "Scoring" },
+        ]}
+      />
+
+      <div className="w-full max-w-[1280px] px-8 pb-14 pt-7">
+        <ScoringClient
+          visitId={visitId}
+          visitFarmName={farm?.name ?? "Unknown farm"}
+          flocks={flocks}
+          definitions={definitions}
+          initialScores={initialScores}
+        />
       </div>
     </>
   );
