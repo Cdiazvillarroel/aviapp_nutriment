@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Topbar } from "@/components/ui/topbar";
 import { createFarm } from "../actions";
+import { HousesEditor } from "@/components/farms/houses-editor";
 
 export default async function NewFarmPage({
   searchParams,
@@ -36,19 +37,17 @@ export default async function NewFarmPage({
         ]}
       />
 
-      <div className="w-full max-w-[720px] px-8 pb-14 pt-7">
+      <div className="w-full max-w-[960px] px-8 pb-14 pt-7">
         <div className="page-header">
           <div>
             <h1>Add a farm</h1>
-            <div className="page-header__sub">Houses and flocks can be added once the farm exists.</div>
+            <div className="page-header__sub">Set up the farm and its houses. Flocks are added separately as they cycle through.</div>
           </div>
         </div>
 
         {error && (
-          <div
-            className="mb-4 rounded-md border px-3 py-2 text-xs"
-            style={{ background: "var(--bad-bg)", borderColor: "var(--bad-bg)", color: "var(--bad)" }}
-          >
+          <div className="mb-4 rounded-md border px-3 py-2 text-xs"
+               style={{ background: "var(--bad-bg)", borderColor: "var(--bad-bg)", color: "var(--bad)" }}>
             {decodeFriendlyError(error)}
           </div>
         )}
@@ -59,9 +58,14 @@ export default async function NewFarmPage({
               <input className="input" name="name" required maxLength={120} autoFocus />
             </Field>
 
-            <Field label="Reference ID" hint="Optional internal code or NLIS-style reference. e.g. FE-001.">
-              <input className="input" name="reference_id" maxLength={40} />
-            </Field>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Reference ID" hint="Optional internal code. e.g. FE-001.">
+                <input className="input" name="reference_id" maxLength={40} />
+              </Field>
+              <Field label="Address">
+                <input className="input" name="address" maxLength={240} />
+              </Field>
+            </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Region">
@@ -83,15 +87,16 @@ export default async function NewFarmPage({
               </Field>
             </div>
 
-            <Field label="Address" hint="Optional. Used in field reports.">
-              <input className="input" name="address" maxLength={240} />
-            </Field>
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium" style={{ color: "var(--text-2)" }}>
+                Houses
+              </div>
+              <HousesEditor />
+            </div>
           </div>
 
-          <div
-            className="flex justify-end gap-2 border-t px-5 py-3"
-            style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}
-          >
+          <div className="flex justify-end gap-2 border-t px-5 py-3"
+               style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
             <Link href="/farms" className="btn btn--ghost">Cancel</Link>
             <button type="submit" className="btn btn--primary">Create farm</button>
           </div>
