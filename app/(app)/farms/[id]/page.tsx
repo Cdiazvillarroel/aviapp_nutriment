@@ -250,3 +250,37 @@ export default async function FarmDetailPage({
                     return (
                       <Link
                         key={v.id}
+                        href={`/visits/${v.id}`}
+                        className="grid items-center gap-3 border-b px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
+                        style={{ borderColor: "var(--divider)", gridTemplateColumns: "auto 1fr auto" }}
+                      >
+                        <div className="font-mono text-[11px]" style={{ color: "var(--text-3)" }}>
+                          {d.toLocaleDateString("en-AU", { day: "2-digit", month: "short" })}
+                        </div>
+                        <div className="text-[12px]">
+                          {visitTypeLabel(v.type)}
+                          <span className="ml-2 text-[11px]" style={{ color: "var(--text-3)" }}>
+                            {timeOf(v.scheduled_at)}
+                          </span>
+                        </div>
+                        <span
+                          className={`pill ${
+                            v.status === "completed" ? "pill--ok" :
+                            v.status === "in_progress" ? "pill--warn" :
+                            isPast ? "pill--bad" : ""
+                          }`}
+                        >
+                          {v.status.replace("_", " ")}
+                        </span>
+                      </Link>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
