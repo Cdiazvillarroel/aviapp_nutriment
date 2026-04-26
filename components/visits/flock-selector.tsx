@@ -4,10 +4,17 @@ import { useState } from "react";
 
 interface Props {
   flocks: { id: string; reference: string | null; house_name: string }[];
+  initiallySelected?: string[];
 }
 
-export function FlockSelector({ flocks }: Props) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(flocks.map(f => f.id)));
+export function FlockSelector({ flocks, initiallySelected }: Props) {
+  // If initiallySelected is provided (edit mode), use that.
+  // Otherwise default to all selected (create mode).
+  const initial = initiallySelected !== undefined
+    ? new Set(initiallySelected)
+    : new Set(flocks.map(f => f.id));
+
+  const [selected, setSelected] = useState<Set<string>>(initial);
 
   function toggle(id: string) {
     setSelected(prev => {
