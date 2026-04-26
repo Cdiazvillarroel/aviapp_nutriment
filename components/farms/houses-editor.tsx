@@ -85,7 +85,7 @@ export function HousesEditor({ initial = [] }: Props) {
                 <Th>Drink</Th>
                 <Th>Feed</Th>
                 <Th>Housing</Th>
-                <Th></Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -106,10 +106,12 @@ export function HousesEditor({ initial = [] }: Props) {
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({ children }: { children?: React.ReactNode }) {
   return (
-    <th className="border-b px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wider"
-        style={{ borderColor: "var(--border)" }}>
+    <th
+      className="border-b px-2 py-2 text-left text-[10px] font-medium uppercase tracking-wider"
+      style={{ borderColor: "var(--border)" }}
+    >
       {children}
     </th>
   );
