@@ -116,6 +116,9 @@ export default async function VisitDetailPage({
             <span className={`pill ${visit.status === "completed" ? "pill--ok" : visit.status === "in_progress" ? "pill--warn" : ""}`}>
               {visit.status.replace("_", " ")}
             </span>
+            <Link href={`/visits/${visit.id}/edit`} className="btn btn--ghost btn--sm">
+              Edit
+            </Link>
             <VisitStatusActions visitId={visit.id} status={visit.status} />
           </div>
         </div>
@@ -203,7 +206,10 @@ export default async function VisitDetailPage({
               <div className="card__body card__body--flush">
                 {flocks.length === 0 ? (
                   <div className="px-5 py-6 text-center text-xs" style={{ color: "var(--text-2)" }}>
-                    No flocks attached. Edit the visit to add some.
+                    No flocks attached.{" "}
+                    <Link href={`/visits/${visit.id}/edit`} style={{ color: "var(--green-700)" }}>
+                      Edit the visit to add some.
+                    </Link>
                   </div>
                 ) : (
                   flocks.map(fl => (
