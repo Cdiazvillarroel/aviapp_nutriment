@@ -111,6 +111,9 @@ export default async function FarmDetailPage({
             </div>
           </div>
           <div className="flex gap-2">
+            <Link href={`/farms/${farm.id}/edit`} className="btn btn--ghost">
+              Edit
+            </Link>
             <Link href={`/visits/new?farm=${farm.id}`} className="btn btn--primary">
               + Schedule visit
             </Link>
@@ -151,7 +154,10 @@ export default async function FarmDetailPage({
             <div className="card__body card__body--flush">
               {houses.length === 0 ? (
                 <div className="px-5 py-10 text-center text-sm" style={{ color: "var(--text-2)" }}>
-                  No houses yet for this farm.
+                  No houses yet for this farm.{" "}
+                  <Link href={`/farms/${farm.id}/edit`} style={{ color: "var(--green-700)" }}>
+                    Add some →
+                  </Link>
                 </div>
               ) : (
                 houses.map(h => {
