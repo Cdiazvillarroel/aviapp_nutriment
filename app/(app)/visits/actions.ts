@@ -89,4 +89,46 @@ export async function updateVisitStatus(visitId: string, status: string) {
   revalidatePath(`/visits/${visitId}`);
   revalidatePath("/visits");
   revalidatePath("/dashboard");
+
+  export async function updateVisit(formData: FormData) {
+  const { supabase, clientId } = await resolveClientId();
+
+  const visitId = String(formData.get("visit_id") ?? "");
+  const date = String(formData.get("date") ?? "");
+  const time = String(formData.get("time") ?? "09:00");
+  const type = String(formData.get("type") ?? "routine");
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const flockIds = formData.getAll("flock_ids").map(String).filter(Boolean);
+
+  if (!visitId) redirect("/visits");
+
+  const scheduled_at = new Date(`${date}T${time}:00`).toISOString();
+
+  const { error: updateErr } = await supabase
+    .from("visits")
+    .update({
+      scheduled_at,
+      type,
+      notes,
+    })
+    .eq("id", visitId)
+    .eq("client_id", clientId);
+
+  if (updateErr) {
+    redirect(`/visits/${visitId}/edit?error=${encodeURIComponent(updateErr.message)}`);
+  }
+
+  // Sync visit_flocks: delete all and re-insert (simple, idempotent).
+  await supabase.from("visit_flocks").delete().eq("visit_id", visitId);
+
+  if (flockIds.length > 0) {
+    const rows = flockIds.map(fid => ({ visit_id: visitId, flock_id: fid }));
+    await supabase.from("visit_flocks").insert(rows);
+  }
+
+  revalidatePath("/visits");
+  revalidatePath("/dashboard");
+  revalidatePath(`/visits/${visitId}`);
+  redirect(`/visits/${visitId}`);
 }
+
