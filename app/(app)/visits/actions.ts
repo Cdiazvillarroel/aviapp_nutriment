@@ -89,8 +89,9 @@ export async function updateVisitStatus(visitId: string, status: string) {
   revalidatePath(`/visits/${visitId}`);
   revalidatePath("/visits");
   revalidatePath("/dashboard");
+}
 
-  export async function updateVisit(formData: FormData) {
+export async function updateVisit(formData: FormData) {
   const { supabase, clientId } = await resolveClientId();
 
   const visitId = String(formData.get("visit_id") ?? "");
@@ -131,4 +132,3 @@ export async function updateVisitStatus(visitId: string, status: string) {
   revalidatePath(`/visits/${visitId}`);
   redirect(`/visits/${visitId}`);
 }
-
