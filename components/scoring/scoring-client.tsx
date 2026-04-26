@@ -152,4 +152,134 @@ export function ScoringClient({ visitId, visitFarmName, flocks, definitions, ini
             {scoredForFlock} of {totalForFlock} items scored for {activeFlock?.reference ?? "this flock"} · autosaving
           </div>
         </div>
-      </d
+      </div>
+
+      {flocks.length > 1 && (
+        <div className="mb-5 flex items-center gap-1 overflow-x-auto border-b" style={{ borderColor: "var(--border)" }}>
+          {flocks.map(f => {
+            const flockKey = `${f.id}::`;
+            const flockScoredCount = Array.from(scoreMap.entries()).filter(
+              ([k, v]) => k.startsWith(flockKey) && v.score !== null
+            ).length;
+            const isActive = activeFlockId === f.id;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setActiveFlockId(f.id)}
+                className="relative -mb-px flex items-center gap-2 whitespace-nowrap px-3 py-2.5 text-[13px] font-medium transition-colors"
+                style={{
+                  color: isActive ? "var(--text)" : "var(--text-2)",
+                  borderBottom: `2px solid ${isActive ? "var(--green-700)" : "transparent"}`,
+                }}
+              >
+                <span className="font-mono">{f.reference ?? "—"}</span>
+                <span className="text-[11px]" style={{ color: "var(--text-3)" }}>
+                  {f.house_name} · {f.age_days}d
+                </span>
+                <span className="rounded-full px-1.5 py-px text-[10px] font-medium tabular-nums"
+                      style={{
+                        background: isActive ? "var(--green-100)" : "var(--surface-2)",
+                        color: isActive ? "var(--green-700)" : "var(--text-3)",
+                      }}>
+                  {flockScoredCount}/{totalForFlock}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {flocks.length === 0 && (
+        <div className="card">
+          <div className="card__body text-center" style={{ padding: "60px 24px" }}>
+            <div className="font-display text-xl mb-2" style={{ fontVariationSettings: "'opsz' 48", color: "var(--text-2)" }}>
+              No flocks attached to this visit
+            </div>
+            <p className="m-0 mb-4 text-[13px]" style={{ color: "var(--text-2)" }}>
+              You need to attach at least one flock before scoring.
+            </p>
+            <Link href={`/visits/${visitId}`} className="btn btn--primary">
+              Back to visit
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {flocks.length > 0 && sections.map(({ section, defs }) => (
+        <div key={section} className="card mb-4">
+          <div className="card__header">
+            <h2 className="card__title">
+              <IconCheckSquare size={16} />
+              {section}
+            </h2>
+            <span className="text-[11px]" style={{ color: "var(--text-3)" }}>
+              {defs.length} item{defs.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="card__body card__body--flush">
+            {defs.map(d => {
+              const cell = getCell(activeFlockId, d.id);
+              return (
+                <ScoreItemRow
+                  key={d.id}
+                  visitId={visitId}
+                  flockId={activeFlockId}
+                  definition={d}
+                  cell={cell}
+                  onScoreChange={(s) => handleScoreChange(activeFlockId, d.id, s)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScoreItemRow({
+  visitId, flockId, definition, cell, onScoreChange,
+}: {
+  visitId: string;
+  flockId: string;
+  definition: Definition;
+  cell: ScoreCellState;
+  onScoreChange: (score: number | null) => void;
+}) {
+  return (
+    <div className="grid items-center gap-4 border-b px-5 py-4 last:border-b-0"
+         style={{ borderColor: "var(--divider)", gridTemplateColumns: "1.4fr auto 1.5fr 80px" }}>
+      <div>
+        <div className="text-[13px] font-medium">{definition.name}</div>
+        <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
+          0 = healthy · {definition.scale_max} = severe
+        </div>
+      </div>
+
+      <ScoreButtons
+        scaleMax={definition.scale_max}
+        currentScore={cell.score}
+        onChange={onScoreChange}
+        disabled={cell.status === "saving"}
+      />
+
+      <PhotoCapture
+        visitId={visitId}
+        visitScoreId={cell.scoreId}
+        onScoreNeeded={async () => null}
+        initialPhotos={cell.photos}
+      />
+
+      <div className="text-right text-[11px]" style={{ color: cell.status === "error" ? "var(--bad)" : "var(--text-3)" }}>
+        {cell.status === "saving" && "Saving…"}
+        {cell.status === "saved" && (
+          <span style={{ color: "var(--ok)" }}>✓ Saved</span>
+        )}
+        {cell.status === "error" && (cell.errorMsg ?? "Error")}
+        {cell.status === "idle" && cell.score !== null && (
+          <span style={{ color: "var(--text-3)" }}>Saved</span>
+        )}
+      </div>
+    </div>
+  );
+}
