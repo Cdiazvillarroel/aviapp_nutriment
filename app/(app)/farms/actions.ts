@@ -53,14 +53,14 @@ function parseLatLng(formData: FormData): { lat: number | null; lng: number | nu
   return { lat, lng };
 }
 
-export async function createFarm(formData: FormData) {
+export async function createFarm(formData: FormData): Promise<void> {
   const { supabase, clientId } = await resolveContext();
 
   const name = String(formData.get("name") ?? "").trim();
   const address = String(formData.get("address") ?? "").trim() || null;
   const region = String(formData.get("region") ?? "").trim() || null;
   if (!name) {
-    return { ok: false as const, error: "Farm name is required" };
+    throw new Error("Farm name is required");
   }
 
   const { lat, lng } = parseLatLng(formData);
@@ -79,7 +79,7 @@ export async function createFarm(formData: FormData) {
     .single();
 
   if (error || !farm) {
-    return { ok: false as const, error: error?.message ?? "Could not create farm" };
+    throw new Error(error?.message ?? "Could not create farm");
   }
 
   const housesRaw = String(formData.get("houses_json") ?? "[]");
@@ -114,14 +114,14 @@ export async function createFarm(formData: FormData) {
   redirect(`/farms/${farm.id}`);
 }
 
-export async function updateFarm(farmId: string, formData: FormData) {
+export async function updateFarm(farmId: string, formData: FormData): Promise<void> {
   const { supabase, clientId } = await resolveContext();
 
   const name = String(formData.get("name") ?? "").trim();
   const address = String(formData.get("address") ?? "").trim() || null;
   const region = String(formData.get("region") ?? "").trim() || null;
   if (!name) {
-    return { ok: false as const, error: "Farm name is required" };
+    throw new Error("Farm name is required");
   }
 
   const { lat, lng } = parseLatLng(formData);
@@ -133,7 +133,7 @@ export async function updateFarm(farmId: string, formData: FormData) {
     .eq("client_id", clientId);
 
   if (farmErr) {
-    return { ok: false as const, error: farmErr.message };
+    throw new Error(farmErr.message);
   }
 
   const housesRaw = String(formData.get("houses_json") ?? "[]");
@@ -235,7 +235,7 @@ async function syncContacts(supabase: Awaited<ReturnType<typeof createClient>>, 
   }
 }
 
-export async function deleteFarm(farmId: string) {
+export async function deleteFarm(farmId: string): Promise<void> {
   const { supabase, clientId } = await resolveContext();
   await supabase.from("farms").delete().eq("id", farmId).eq("client_id", clientId);
   revalidatePath("/farms");
