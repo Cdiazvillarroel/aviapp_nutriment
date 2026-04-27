@@ -21,16 +21,15 @@ async function resolveContext() {
 }
 
 interface HouseInput {
-  id: string | null;
+  id?: string;
   name: string;
   custom_id: string;
-  length_m: number | null;
-  width_m: number | null;
-  drink_system: string | null;
-  feed_system: string | null;
-  housing_system: string | null;
-  capacity: number | null;
-  archived: boolean;
+  dimensions: string;
+  drink_system: string;
+  feed_system: string;
+  housing_system: string;
+  capacity: string;
+  _markedForDelete?: boolean;
 }
 
 interface ContactInput {
@@ -51,6 +50,33 @@ function parseLatLng(formData: FormData): { lat: number | null; lng: number | nu
   if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) return { lat: null, lng: null };
   if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) return { lat: null, lng: null };
   return { lat, lng };
+}
+
+// Parse dimensions string like "12 x 150 m" or "150 m" -> { length_m, width_m }
+function parseDimensions(s: string): { length_m: number | null; width_m: number | null } {
+  if (!s || s.trim() === "") return { length_m: null, width_m: null };
+  const cleaned = s.toLowerCase().replace(/m/g, "").replace(/\s+/g, "").trim();
+  if (cleaned === "") return { length_m: null, width_m: null };
+  if (cleaned.includes("x")) {
+    const parts = cleaned.split("x");
+    const w = parseFloat(parts[0]);
+    const l = parseFloat(parts[1]);
+    return {
+      width_m: Number.isFinite(w) ? w : null,
+      length_m: Number.isFinite(l) ? l : null,
+    };
+  }
+  const single = parseFloat(cleaned);
+  return {
+    width_m: null,
+    length_m: Number.isFinite(single) ? single : null,
+  };
+}
+
+function parseCapacity(s: string): number | null {
+  if (!s || s.trim() === "") return null;
+  const n = parseInt(s.trim(), 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function createFarm(formData: FormData): Promise<void> {
@@ -90,18 +116,19 @@ export async function createFarm(formData: FormData): Promise<void> {
     houses = [];
   }
   const housesToInsert = houses
-    .filter(function (h) { return !h.archived && h.name.trim() !== ""; })
+    .filter(function (h) { return !h._markedForDelete && h.name.trim() !== ""; })
     .map(function (h) {
+      const dims = parseDimensions(h.dimensions);
       return {
         farm_id: farm.id,
         name: h.name.trim(),
         custom_id: h.custom_id.trim() || null,
-        length_m: h.length_m,
-        width_m: h.width_m,
-        drink_system: h.drink_system,
-        feed_system: h.feed_system,
-        housing_system: h.housing_system,
-        capacity: h.capacity,
+        length_m: dims.length_m,
+        width_m: dims.width_m,
+        drink_system: h.drink_system.trim() || null,
+        feed_system: h.feed_system.trim() || null,
+        housing_system: h.housing_system.trim() || null,
+        capacity: parseCapacity(h.capacity),
       };
     });
   if (housesToInsert.length > 0) {
@@ -144,8 +171,11 @@ export async function updateFarm(farmId: string, formData: FormData): Promise<vo
     houses = [];
   }
   for (const h of houses) {
+    const dims = parseDimensions(h.dimensions);
+    const cap = parseCapacity(h.capacity);
+
     if (h.id) {
-      if (h.archived) {
+      if (h._markedForDelete) {
         await supabase
           .from("houses")
           .update({ archived_at: new Date().toISOString() })
@@ -156,28 +186,28 @@ export async function updateFarm(farmId: string, formData: FormData): Promise<vo
           .update({
             name: h.name.trim(),
             custom_id: h.custom_id.trim() || null,
-            length_m: h.length_m,
-            width_m: h.width_m,
-            drink_system: h.drink_system,
-            feed_system: h.feed_system,
-            housing_system: h.housing_system,
-            capacity: h.capacity,
+            length_m: dims.length_m,
+            width_m: dims.width_m,
+            drink_system: h.drink_system.trim() || null,
+            feed_system: h.feed_system.trim() || null,
+            housing_system: h.housing_system.trim() || null,
+            capacity: cap,
             archived_at: null,
           })
           .eq("id", h.id);
       }
     } else {
-      if (!h.archived && h.name.trim() !== "") {
+      if (!h._markedForDelete && h.name.trim() !== "") {
         await supabase.from("houses").insert({
           farm_id: farmId,
           name: h.name.trim(),
           custom_id: h.custom_id.trim() || null,
-          length_m: h.length_m,
-          width_m: h.width_m,
-          drink_system: h.drink_system,
-          feed_system: h.feed_system,
-          housing_system: h.housing_system,
-          capacity: h.capacity,
+          length_m: dims.length_m,
+          width_m: dims.width_m,
+          drink_system: h.drink_system.trim() || null,
+          feed_system: h.feed_system.trim() || null,
+          housing_system: h.housing_system.trim() || null,
+          capacity: cap,
         });
       }
     }
