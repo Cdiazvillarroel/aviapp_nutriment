@@ -32,6 +32,7 @@ const NAV_PRIMARY: NavItem[] = [
 
 const NAV_INSIGHTS: NavItem[] = [
   { href: "/reports",    label: "Reports",    icon: IconReport },
+  { href: "/analytics",  label: "Analytics",  icon: IconTrendUp },
   { href: "/benchmarks", label: "Benchmarks", icon: IconTrendUp, soon: true },
 ];
 
