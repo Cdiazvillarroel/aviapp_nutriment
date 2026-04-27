@@ -1,172 +1,76 @@
-"use server";
+create table if not exists farm_contacts (
+  id          uuid primary key default gen_random_uuid(),
+  farm_id     uuid not null references farms(id) on delete cascade,
+  role        text not null,
+  name        text not null,
+  phone       text,
+  email       text,
+  notes       text,
+  display_order int not null default 0,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
 
-import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+create index if not exists farm_contacts_farm_id_idx on farm_contacts(farm_id);
 
-interface HouseInput {
-  id?: string;
-  name: string;
-  custom_id?: string;
-  dimensions?: string;
-  drink_system?: string;
-  feed_system?: string;
-  housing_system?: string;
-  capacity?: string;
-  _markedForDelete?: boolean;
-}
+alter table farm_contacts enable row level security;
 
-async function resolveContext() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+drop policy if exists "Farm contacts: members can read" on farm_contacts;
+create policy "Farm contacts: members can read"
+  on farm_contacts for select
+  using (
+    farm_id in (
+      select id from farms
+      where client_id in (select client_id from client_members where user_id = auth.uid())
+    )
+  );
 
-  const { data: membership } = await supabase
-    .from("client_members")
-    .select("client_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .single();
+drop policy if exists "Farm contacts: members can insert" on farm_contacts;
+create policy "Farm contacts: members can insert"
+  on farm_contacts for insert
+  with check (
+    farm_id in (
+      select id from farms
+      where client_id in (select client_id from client_members where user_id = auth.uid())
+    )
+  );
 
-  if (!membership) redirect("/farms?error=no-client");
-  return { supabase, clientId: membership.client_id };
-}
+drop policy if exists "Farm contacts: members can update" on farm_contacts;
+create policy "Farm contacts: members can update"
+  on farm_contacts for update
+  using (
+    farm_id in (
+      select id from farms
+      where client_id in (select client_id from client_members where user_id = auth.uid())
+    )
+  );
 
-function parseHouses(json: string): HouseInput[] {
-  try {
-    const parsed = JSON.parse(json);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch {
-    return [];
-  }
-}
+drop policy if exists "Farm contacts: members can delete" on farm_contacts;
+create policy "Farm contacts: members can delete"
+  on farm_contacts for delete
+  using (
+    farm_id in (
+      select id from farms
+      where client_id in (select client_id from client_members where user_id = auth.uid())
+    )
+  );
 
-function houseToInsertRow(h: HouseInput, farmId: string) {
-  return {
-    farm_id: farmId,
-    name: h.name.trim(),
-    custom_id: h.custom_id?.trim() || null,
-    dimensions: h.dimensions?.trim() || null,
-    drink_system: h.drink_system?.trim() || null,
-    feed_system: h.feed_system?.trim() || null,
-    housing_system: h.housing_system?.trim() || null,
-    capacity: h.capacity ? parseInt(h.capacity, 10) || null : null,
-  };
-}
+do $$
+declare
+  v_farm_id uuid;
+begin
+  if not exists (select 1 from farm_contacts) then
+    select id into v_farm_id
+    from farms
+    where client_id = '11111111-1111-1111-1111-111111111111'
+    order by created_at
+    limit 1;
 
-function houseToUpdateRow(h: HouseInput) {
-  return {
-    name: h.name.trim(),
-    custom_id: h.custom_id?.trim() || null,
-    dimensions: h.dimensions?.trim() || null,
-    drink_system: h.drink_system?.trim() || null,
-    feed_system: h.feed_system?.trim() || null,
-    housing_system: h.housing_system?.trim() || null,
-    capacity: h.capacity ? parseInt(h.capacity, 10) || null : null,
-  };
-}
-
-export async function createFarm(formData: FormData) {
-  const { supabase, clientId } = await resolveContext();
-
-  const name = String(formData.get("name") ?? "").trim();
-  const reference_id = String(formData.get("reference_id") ?? "").trim() || null;
-  const complex_id = String(formData.get("complex_id") ?? "") || null;
-  const region_id = String(formData.get("region_id") ?? "") || null;
-  const address = String(formData.get("address") ?? "").trim() || null;
-  const housesJson = String(formData.get("houses_json") ?? "[]");
-
-  if (!name) {
-    redirect("/farms/new?error=name-required");
-  }
-
-  const { data: farm, error } = await supabase
-    .from("farms")
-    .insert({
-      client_id: clientId,
-      name,
-      reference_id,
-      complex_id,
-      region_id,
-      address,
-    })
-    .select("id")
-    .single();
-
-  if (error || !farm) {
-    redirect(`/farms/new?error=${encodeURIComponent(error?.message ?? "unknown")}`);
-  }
-
-  const houses = parseHouses(housesJson)
-    .filter(h => !h._markedForDelete && h.name.trim() !== "");
-
-  if (houses.length > 0) {
-    const rows = houses.map(h => houseToInsertRow(h, farm.id));
-    await supabase.from("houses").insert(rows);
-  }
-
-  revalidatePath("/farms");
-  redirect(`/farms/${farm.id}`);
-}
-
-export async function updateFarm(formData: FormData) {
-  const { supabase, clientId } = await resolveContext();
-
-  const farmId = String(formData.get("farm_id") ?? "");
-  if (!farmId) redirect("/farms");
-
-  const name = String(formData.get("name") ?? "").trim();
-  const reference_id = String(formData.get("reference_id") ?? "").trim() || null;
-  const complex_id = String(formData.get("complex_id") ?? "") || null;
-  const region_id = String(formData.get("region_id") ?? "") || null;
-  const address = String(formData.get("address") ?? "").trim() || null;
-  const housesJson = String(formData.get("houses_json") ?? "[]");
-
-  if (!name) {
-    redirect(`/farms/${farmId}/edit?error=name-required`);
-  }
-
-  const { error: updateErr } = await supabase
-    .from("farms")
-    .update({ name, reference_id, complex_id, region_id, address })
-    .eq("id", farmId)
-    .eq("client_id", clientId);
-
-  if (updateErr) {
-    redirect(`/farms/${farmId}/edit?error=${encodeURIComponent(updateErr.message)}`);
-  }
-
-  const houses = parseHouses(housesJson);
-
-  // Archive marked-for-delete houses (soft delete).
-  const toArchive = houses.filter(h => h.id && h._markedForDelete);
-  for (const h of toArchive) {
-    await supabase
-      .from("houses")
-      .update({ archived_at: new Date().toISOString() })
-      .eq("id", h.id!)
-      .eq("farm_id", farmId);
-  }
-
-  // Update existing houses.
-  const toUpdate = houses.filter(h => h.id && !h._markedForDelete && h.name.trim() !== "");
-  for (const h of toUpdate) {
-    await supabase
-      .from("houses")
-      .update(houseToUpdateRow(h))
-      .eq("id", h.id!)
-      .eq("farm_id", farmId);
-  }
-
-  // Insert new houses.
-  const toInsert = houses.filter(h => !h.id && !h._markedForDelete && h.name.trim() !== "");
-  if (toInsert.length > 0) {
-    const rows = toInsert.map(h => houseToInsertRow(h, farmId));
-    await supabase.from("houses").insert(rows);
-  }
-
-  revalidatePath("/farms");
-  revalidatePath(`/farms/${farmId}`);
-  redirect(`/farms/${farmId}`);
-}
+    if v_farm_id is not null then
+      insert into farm_contacts (farm_id, role, name, phone, email, display_order) values
+        (v_farm_id, 'Farm Manager',  'David Robertson', '+61 412 345 678', 'd.robertson@bendigopoultry.au', 0),
+        (v_farm_id, 'Owner',         'Margaret Chen',   '+61 423 567 890', 'm.chen@example.au',             1),
+        (v_farm_id, 'Feed Supplier', 'Riverina Stockfeeds', '+61 3 5443 1100', 'orders@riverinastock.au',  2);
+    end if;
+  end if;
+end $$;
