@@ -45,20 +45,28 @@ export default async function EditFarmPage({
   if (!farmRes.data) notFound();
 
   const farm = farmRes.data;
-  const housesInitial = (housesRes.data ?? []).map(function (h) {
-    return {
-      id: h.id,
-      name: h.name,
-      custom_id: h.custom_id ?? "",
-      length_m: h.length_m,
-      width_m: h.width_m,
-      drink_system: h.drink_system,
-      feed_system: h.feed_system,
-      housing_system: h.housing_system,
-      capacity: h.capacity,
-      archived: h.archived_at !== null,
-    };
-  });
+
+  const housesInitial = (housesRes.data ?? [])
+    .filter(function (h) { return h.archived_at === null; })
+    .map(function (h) {
+      const dimensions =
+        h.length_m && h.width_m
+          ? h.width_m + " x " + h.length_m + " m"
+          : h.length_m
+            ? h.length_m + " m"
+            : "";
+      return {
+        id: h.id,
+        name: h.name ?? "",
+        custom_id: h.custom_id ?? "",
+        dimensions: dimensions,
+        drink_system: h.drink_system ?? "",
+        feed_system: h.feed_system ?? "",
+        housing_system: h.housing_system ?? "",
+        capacity: h.capacity !== null && h.capacity !== undefined ? h.capacity.toString() : "",
+      };
+    });
+
   const contactsInitial = (contactsRes.data ?? []).map(function (c) {
     return {
       id: c.id,
