@@ -1,76 +1,110 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Topbar } from "@/components/ui/topbar";
-import { PrintButton } from "@/components/reports/print-button";
+import { IconReport, IconCalendar, IconAlert } from "@/components/ui/icons";
+import { ReportsFilters } from "@/components/reports/reports-filters";
+import { PrescriptionRow } from "@/components/reports/prescription-row";
 
-const QUARTERS: Record<string, { label: string; start: number; end: number }> = {
-  q1: { label: "Q1 (Jan–Mar)", start: 0,  end: 2  },
-  q2: { label: "Q2 (Apr–Jun)", start: 3,  end: 5  },
-  q3: { label: "Q3 (Jul–Sep)", start: 6,  end: 8  },
-  q4: { label: "Q4 (Oct–Dec)", start: 9,  end: 11 },
-};
+interface Prescription {
+  id: string;
+  drug_name: string;
+  active_ingredient: string | null;
+  dose: string | null;
+  administration: string | null;
+  start_date: string;
+  end_date: string;
+  withdrawal_days: number;
+  indication: string | null;
+  vet_name_override: string | null;
+  vet_license: string | null;
+  flock_id: string;
+  flock_reference: string | null;
+  farm_name: string;
+  withdrawal_until: Date;
+  isInWithdrawal: boolean;
+}
 
-export default async function QuarterlyReportPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+const QUARTERS = [
+  { key: "q1", label: "Q1 (Jan–Mar)", start: 0,  end: 2  },
+  { key: "q2", label: "Q2 (Apr–Jun)", start: 3,  end: 5  },
+  { key: "q3", label: "Q3 (Jul–Sep)", start: 6,  end: 8  },
+  { key: "q4", label: "Q4 (Oct–Dec)", start: 9,  end: 11 },
+];
 
-  const [yearStr, qKey] = id.split("-");
+function getCurrentQuarterRange(): { start: Date; end: Date; label: string; key: string } {
+  const now = new Date();
+  const q = QUARTERS[Math.floor(now.getMonth() / 3)];
+  const start = new Date(now.getFullYear(), q.start, 1);
+  const end = new Date(now.getFullYear(), q.end + 1, 0, 23, 59, 59);
+  return { start, end, label: `${q.label} ${now.getFullYear()}`, key: `${now.getFullYear()}-${q.key}` };
+}
+
+function parseQuarterParam(param: string | undefined): { start: Date; end: Date; label: string; key: string } {
+  if (!param) return getCurrentQuarterRange();
+  const [yearStr, qKey] = param.split("-");
   const year = parseInt(yearStr, 10);
-  const quarter = QUARTERS[qKey];
-  if (!year || !quarter) {
-    return (
-      <>
-        <Topbar crumbs={[{ label: "Reports", href: "/reports" }, { label: "Invalid report" }]} />
-        <div className="w-full max-w-[720px] px-8 pb-14 pt-7">
-          <p className="text-sm" style={{ color: "var(--text-2)" }}>
-            Invalid report identifier. Use format YYYY-q1, YYYY-q2, etc.
-          </p>
-          <Link href="/reports" className="btn btn--primary mt-4">Back to reports</Link>
-        </div>
-      </>
-    );
-  }
+  const q = QUARTERS.find(x => x.key === qKey);
+  if (!year || !q) return getCurrentQuarterRange();
+  const start = new Date(year, q.start, 1);
+  const end = new Date(year, q.end + 1, 0, 23, 59, 59);
+  return { start, end, label: `${q.label} ${year}`, key: param };
+}
 
-  const start = new Date(year, quarter.start, 1);
-  const end = new Date(year, quarter.end + 1, 0, 23, 59, 59);
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; farm?: string; flock?: string }>;
+}) {
+  const params = await searchParams;
+  const { start, end, label: quarterLabel, key: quarterKey } = parseQuarterParam(params.q);
+  const farmFilter = params.farm ?? "";
+  const flockFilter = params.flock ?? "";
 
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data: membership } = await supabase
     .from("client_members")
-    .select("client_id, clients(name, slug)")
+    .select("client_id")
     .eq("user_id", user!.id)
     .limit(1)
     .single();
 
   const clientId = membership!.client_id;
-  const client = Array.isArray(membership?.clients) ? membership?.clients[0] : membership?.clients;
 
-  const { data: prescriptionsData } = await supabase
-    .from("prescriptions")
-    .select(`
-      id, drug_name, active_ingredient, dose, administration,
-      start_date, end_date, withdrawal_days,
-      indication, reason,
-      vet_name_override, vet_license,
-      flocks(reference, initial_count, breeds(name), houses(name, farms(name)))
-    `)
-    .eq("client_id", clientId)
-    .gte("start_date", start.toISOString().slice(0, 10))
-    .lte("start_date", end.toISOString().slice(0, 10))
-    .order("start_date", { ascending: true });
+  const [prescriptionsRes, farmsRes] = await Promise.all([
+    supabase
+      .from("prescriptions")
+      .select(`
+        id, drug_name, active_ingredient, dose, administration,
+        start_date, end_date, withdrawal_days,
+        indication, reason,
+        vet_name_override, vet_license,
+        flock_id,
+        flocks(reference, houses(farm_id, farms(id, name)))
+      `)
+      .eq("client_id", clientId)
+      .order("start_date", { ascending: false }),
 
-  const prescriptions = (prescriptionsData ?? []).map(p => {
+    supabase
+      .from("farms")
+      .select("id, name")
+      .eq("client_id", clientId)
+      .is("archived_at", null)
+      .order("name"),
+  ]);
+
+  const allRaw = prescriptionsRes.data ?? [];
+  const now = new Date();
+
+  const all: Prescription[] = allRaw.map(p => {
     const flock = Array.isArray(p.flocks) ? p.flocks[0] : p.flocks;
-    const breed = flock ? (Array.isArray(flock.breeds) ? flock.breeds[0] : flock.breeds) : null;
     const house = flock ? (Array.isArray(flock.houses) ? flock.houses[0] : flock.houses) : null;
     const farm = house ? (Array.isArray(house.farms) ? house.farms[0] : house.farms) : null;
 
-    const days = Math.max(1, Math.round((new Date(p.end_date).getTime() - new Date(p.start_date).getTime()) / 86_400_000) + 1);
+    const endDate = new Date(p.end_date);
+    const withdrawalUntil = new Date(endDate);
+    withdrawalUntil.setDate(withdrawalUntil.getDate() + (p.withdrawal_days ?? 0));
 
     return {
       id: p.id,
@@ -81,313 +115,211 @@ export default async function QuarterlyReportPage({
       start_date: p.start_date,
       end_date: p.end_date,
       withdrawal_days: p.withdrawal_days ?? 0,
-      indication: (p.indication as string | null) ?? (p.reason as string | null) ?? "",
-      vet_name: p.vet_name_override ?? "Portal user",
+      indication: (p.indication as string | null) ?? (p.reason as string | null) ?? null,
+      vet_name_override: p.vet_name_override,
       vet_license: p.vet_license,
-      flock_reference: flock?.reference ?? "—",
-      flock_count: flock?.initial_count ?? null,
-      breed_name: breed?.name ?? "—",
+      flock_id: p.flock_id,
+      flock_reference: flock?.reference ?? null,
       farm_name: farm?.name ?? "—",
-      house_name: house?.name ?? "—",
-      treatment_days: days,
+      withdrawal_until: withdrawalUntil,
+      isInWithdrawal: now <= withdrawalUntil,
     };
   });
 
-  const drugMap = new Map<string, { activeIngredient: string | null; count: number; days: number }>();
-  for (const p of prescriptions) {
-    const existing = drugMap.get(p.drug_name);
-    if (existing) {
-      existing.count += 1;
-      existing.days += p.treatment_days;
-    } else {
-      drugMap.set(p.drug_name, {
-        activeIngredient: p.active_ingredient,
-        count: 1,
-        days: p.treatment_days,
-      });
-    }
-  }
-  const drugSummary = Array.from(drugMap.entries())
-    .map(([name, s]) => ({ name, ...s }))
-    .sort((a, b) => b.count - a.count);
-
-  const flocksAffected = new Set(prescriptions.map(p => p.flock_reference)).size;
-  const farmsAffected = new Set(prescriptions.map(p => p.farm_name)).size;
-  const generatedAt = new Date().toLocaleDateString("en-AU", {
-    day: "2-digit", month: "long", year: "numeric",
+  const filtered = all.filter(p => {
+    const startD = new Date(p.start_date);
+    if (startD < start || startD > end) return false;
+    if (flockFilter && p.flock_id !== flockFilter) return false;
+    if (farmFilter && p.farm_name !== farmsRes.data?.find(f => f.id === farmFilter)?.name) return false;
+    return true;
   });
 
-  const reportTitle = `${quarter.label} ${year}`;
+  const drugBreakdown = new Map<string, { count: number; days: number }>();
+  for (const p of filtered) {
+    const days = Math.max(1, Math.round((new Date(p.end_date).getTime() - new Date(p.start_date).getTime()) / 86_400_000) + 1);
+    const existing = drugBreakdown.get(p.drug_name) ?? { count: 0, days: 0 };
+    drugBreakdown.set(p.drug_name, { count: existing.count + 1, days: existing.days + days });
+  }
+  const drugRanking = Array.from(drugBreakdown.entries())
+    .sort((a, b) => b[1].count - a[1].count);
+
+  const flocksAffected = new Set(filtered.map(p => p.flock_id)).size;
+  const inWithdrawalCount = all.filter(p => p.isInWithdrawal).length;
+
+  const quarterOptions: { key: string; label: string }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - (i * 3));
+    const q = QUARTERS[Math.floor(d.getMonth() / 3)];
+    const key = `${d.getFullYear()}-${q.key}`;
+    quarterOptions.push({ key, label: `${q.label} ${d.getFullYear()}` });
+  }
 
   return (
     <>
       <Topbar
         crumbs={[
           { label: "Dashboard", href: "/dashboard" },
-          { label: "Reports", href: "/reports" },
-          { label: reportTitle },
+          { label: "Reports" },
         ]}
       />
 
-      <style>{`
-        @media print {
-          aside, .topbar, .no-print { display: none !important; }
-          main { display: block !important; }
-          body { background: white !important; }
-          .report-page { max-width: none !important; padding: 0 !important; }
-          .report-card { border: none !important; box-shadow: none !important; }
-        }
-        @page { margin: 1.5cm; }
-      `}</style>
-
-      <div className="report-page w-full max-w-[920px] px-8 pb-14 pt-7">
-        <div className="no-print mb-6 flex items-center justify-between">
+      <div className="w-full max-w-[1280px] px-8 pb-14 pt-7">
+        <div className="page-header">
           <div>
-            <Link href="/reports" className="text-xs" style={{ color: "var(--text-2)" }}>
-              ← All reports
+            <h1>Reports & APVMA</h1>
+            <div className="page-header__sub">
+              Antimicrobial use, prescriptions, and withdrawal tracking.
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Link href={`/reports/${quarterKey}`} className="btn">
+              Generate APVMA report
+            </Link>
+            <Link href="/prescriptions/new" className="btn btn--primary">
+              + Record prescription
             </Link>
           </div>
-          <PrintButton />
         </div>
 
-        <div className="report-card card" style={{ background: "var(--surface)" }}>
-          <div className="card__body" style={{ padding: 32 }}>
-            <div className="mb-6 flex items-start justify-between border-b pb-5"
-                 style={{ borderColor: "var(--border)" }}>
-              <div className="flex items-start gap-3">
-                <div className="relative h-10 w-10 flex-shrink-0 rounded-full"
-                     style={{ background: "var(--green-900)" }}>
-                  <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full"
-                        style={{ background: "var(--orange-500)" }} />
-                </div>
-                <div>
-                  <div className="font-display text-lg font-medium leading-tight">
-                    Nutriment Health Pty Ltd
-                  </div>
-                  <div className="text-[11px]" style={{ color: "var(--text-2)" }}>
-                    Bendigo, Victoria · APVMA-aligned report
-                  </div>
-                </div>
-              </div>
-              <div className="text-right text-[11px]" style={{ color: "var(--text-3)" }}>
-                Generated {generatedAt}
-              </div>
-            </div>
+        <ReportsFilters
+          farms={farmsRes.data ?? []}
+          quarterOptions={quarterOptions}
+          currentQuarter={quarterKey}
+          currentFarm={farmFilter}
+        />
 
-            <div className="mb-6">
-              <div className="text-[11px] font-medium uppercase tracking-widest"
-                   style={{ color: "var(--text-3)" }}>
-                Quarterly antimicrobial use report
-              </div>
-              <h1 className="m-0 font-display text-[34px] font-normal tracking-tight"
-                  style={{ fontVariationSettings: "'opsz' 72" }}>
-                {reportTitle}
-              </h1>
-              <div className="mt-1 text-[13px]" style={{ color: "var(--text-2)" }}>
-                Client: <strong>{client?.name ?? "—"}</strong>
-                <span style={{ color: "var(--text-3)" }}> · </span>
-                Period: {start.toLocaleDateString("en-AU")} to {end.toLocaleDateString("en-AU")}
-              </div>
+        {inWithdrawalCount > 0 && (
+          <div
+            className="mt-4 grid gap-3 rounded-lg border p-4"
+            style={{
+              background: "var(--warn-bg)",
+              borderColor: "var(--warn)",
+              gridTemplateColumns: "auto 1fr",
+            }}
+          >
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-lg"
+              style={{ background: "var(--warn)", color: "var(--text-inv)" }}
+            >
+              <IconAlert size={16} />
             </div>
-
-            <div className="mb-7 grid grid-cols-4 gap-4">
-              <SummaryStat label="Prescriptions" value={prescriptions.length.toString()} />
-              <SummaryStat label="Unique drugs" value={drugSummary.length.toString()} />
-              <SummaryStat label="Flocks treated" value={flocksAffected.toString()} />
-              <SummaryStat label="Farms involved" value={farmsAffected.toString()} />
-            </div>
-
-            <div className="mb-7">
-              <h2 className="mb-3 text-[14px] font-medium">Drug summary</h2>
-              {drugSummary.length === 0 ? (
-                <p className="m-0 text-[13px]" style={{ color: "var(--text-2)" }}>
-                  No antimicrobial use recorded in this period.
-                </p>
-              ) : (
-                <table className="w-full text-[12px]">
-                  <thead>
-                    <tr style={{ background: "var(--surface-2)", color: "var(--text-3)" }}>
-                      <Th>Drug brand</Th>
-                      <Th>Active ingredient</Th>
-                      <Th align="right">Prescriptions</Th>
-                      <Th align="right">Treatment days</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drugSummary.map(d => (
-                      <tr key={d.name} className="border-t" style={{ borderColor: "var(--divider)" }}>
-                        <Td>{d.name}</Td>
-                        <Td><span style={{ color: "var(--text-2)" }}>{d.activeIngredient ?? "—"}</span></Td>
-                        <Td align="right" mono>{d.count}</Td>
-                        <Td align="right" mono>{d.days}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
             <div>
-              <h2 className="mb-3 text-[14px] font-medium">Detailed records</h2>
-              {prescriptions.length === 0 ? (
-                <p className="m-0 text-[13px]" style={{ color: "var(--text-2)" }}>
-                  No records to list.
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {prescriptions.map(p => (
-                    <PrescriptionDetailCard key={p.id} p={p} />
-                  ))}
-                </div>
-              )}
+              <div className="text-[13px] font-medium" style={{ color: "var(--warn)" }}>
+                {inWithdrawalCount} flock{inWithdrawalCount === 1 ? "" : "s"} in withdrawal period
+              </div>
+              <div className="mt-0.5 text-[11px]" style={{ color: "var(--warn)" }}>
+                These flocks must not be sent to slaughter until their withdrawal period ends. See the table below.
+              </div>
             </div>
+          </div>
+        )}
 
-            <div className="mt-8 border-t pt-5 text-[11px] leading-relaxed"
-                 style={{ borderColor: "var(--border)", color: "var(--text-3)" }}>
-              <p className="m-0">
-                This report summarises antimicrobial use as recorded in the Nutriment Portal for the period above.
-                Prescribing veterinarians are listed per record. This document is intended as a draft to support
-                APVMA and contractual reporting; before submission, please verify completeness and have the
-                attending veterinarian sign off.
-              </p>
-              <p className="m-0 mt-2">
-                Report ID: <code className="font-mono">{client?.slug ?? "—"}-{id}</code>
-              </p>
+        <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="stat">
+            <div className="stat__label">{quarterLabel}</div>
+            <div className="stat__value">{filtered.length}</div>
+            <div className="stat__sub">prescriptions in period</div>
+          </div>
+          <div className="stat">
+            <div className="stat__label">Flocks affected</div>
+            <div className="stat__value">{flocksAffected}</div>
+            <div className="stat__sub">unique flocks treated</div>
+          </div>
+          <div className="stat">
+            <div className="stat__label">Top drug</div>
+            <div className="stat__value" style={{ fontSize: 18 }}>
+              {drugRanking[0]?.[0] ?? "—"}
             </div>
+            <div className="stat__sub">
+              {drugRanking[0] ? `${drugRanking[0][1].count} prescriptions` : "no data"}
+            </div>
+          </div>
+          <div className="stat">
+            <div className="stat__label">In withdrawal</div>
+            <div className="stat__value">{inWithdrawalCount}</div>
+            <div className="stat__sub">across all periods</div>
+          </div>
+        </div>
+
+        {drugRanking.length > 0 && (
+          <div className="mt-6 card">
+            <div className="card__header">
+              <h2 className="card__title">
+                <IconReport size={16} />
+                Drug breakdown — {quarterLabel}
+              </h2>
+            </div>
+            <div className="card__body card__body--flush">
+              {drugRanking.map(([drug, stats]) => (
+                <div
+                  key={drug}
+                  className="grid items-center gap-3 border-b px-5 py-3 last:border-b-0"
+                  style={{ borderColor: "var(--divider)", gridTemplateColumns: "2fr 80px 80px" }}
+                >
+                  <div className="text-[13px] font-medium">{drug}</div>
+                  <div className="text-right font-mono text-[12px] tabular-nums">
+                    {stats.count} <span style={{ color: "var(--text-3)" }}>presc.</span>
+                  </div>
+                  <div className="text-right font-mono text-[12px] tabular-nums">
+                    {stats.days} <span style={{ color: "var(--text-3)" }}>days</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 card">
+          <div className="card__header">
+            <h2 className="card__title">
+              <IconCalendar size={16} />
+              All prescriptions — {quarterLabel}
+            </h2>
+            <span className="text-[11px]" style={{ color: "var(--text-3)" }}>
+              {filtered.length} record{filtered.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="card__body card__body--flush">
+            {filtered.length === 0 ? (
+              <div className="px-5 py-14 text-center text-sm" style={{ color: "var(--text-2)" }}>
+                {all.length === 0 ? (
+                  <>
+                    No prescriptions yet.{" "}
+                    <Link href="/prescriptions/new" style={{ color: "var(--green-700)" }}>
+                      Record the first one →
+                    </Link>
+                  </>
+                ) : (
+                  <>No prescriptions match the current filters.</>
+                )}
+              </div>
+            ) : (
+              <>
+                <div
+                  className="grid items-center gap-3 border-b px-5 py-3 text-[11px] font-medium uppercase tracking-wider"
+                  style={{
+                    borderColor: "var(--divider)",
+                    background: "var(--surface-2)",
+                    color: "var(--text-3)",
+                    gridTemplateColumns: "1.6fr 1.4fr 100px 100px 110px 80px",
+                  }}
+                >
+                  <div>Drug & indication</div>
+                  <div>Flock · Farm</div>
+                  <div className="text-right">Start</div>
+                  <div className="text-right">End</div>
+                  <div className="text-right">Withdrawal</div>
+                  <div></div>
+                </div>
+                {filtered.map(p => (
+                  <PrescriptionRow key={p.id} prescription={p} />
+                ))}
+              </>
+            )}
           </div>
         </div>
       </div>
     </>
-  );
-}
-
-function SummaryStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="rounded-md border p-3"
-      style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}
-    >
-      <div className="text-[10px] font-medium uppercase tracking-wider"
-           style={{ color: "var(--text-3)" }}>
-        {label}
-      </div>
-      <div className="font-display text-[26px] font-normal tracking-tight"
-           style={{ fontVariationSettings: "'opsz' 60" }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function Th({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {
-  return (
-    <th
-      className="border-b px-3 py-2 text-[10px] font-medium uppercase tracking-wider"
-      style={{ borderColor: "var(--border)", textAlign: align }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children, align = "left", mono,
-}: {
-  children: React.ReactNode; align?: "left" | "right"; mono?: boolean;
-}) {
-  return (
-    <td
-      className={`px-3 py-2 ${mono ? "font-mono" : ""}`}
-      style={{ textAlign: align }}
-    >
-      {children}
-    </td>
-  );
-}
-
-function PrescriptionDetailCard({
-  p,
-}: {
-  p: {
-    id: string;
-    drug_name: string;
-    active_ingredient: string | null;
-    dose: string | null;
-    administration: string | null;
-    start_date: string;
-    end_date: string;
-    withdrawal_days: number;
-    indication: string;
-    vet_name: string;
-    vet_license: string | null;
-    flock_reference: string;
-    flock_count: number | null;
-    breed_name: string;
-    farm_name: string;
-    house_name: string;
-    treatment_days: number;
-  };
-}) {
-  function fmt(d: string) {
-    return new Date(d).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
-  }
-
-  return (
-    <div
-      className="rounded-md border p-4"
-      style={{ borderColor: "var(--border)" }}
-    >
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-[14px] font-medium">{p.drug_name}</div>
-          <div className="text-[11px]" style={{ color: "var(--text-2)" }}>
-            {p.active_ingredient ?? "—"}
-          </div>
-        </div>
-        <div className="text-right text-[11px]" style={{ color: "var(--text-2)" }}>
-          {fmt(p.start_date)} → {fmt(p.end_date)}
-          <div style={{ color: "var(--text-3)" }}>
-            {p.treatment_days} day{p.treatment_days === 1 ? "" : "s"} · withdrawal {p.withdrawal_days}d
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-3 border-t pt-3 text-[11px]"
-           style={{ borderColor: "var(--divider)", color: "var(--text-2)" }}>
-        <div>
-          <div style={{ color: "var(--text-3)" }}>Flock</div>
-          <div className="font-medium" style={{ color: "var(--text)" }}>
-            {p.flock_reference}
-          </div>
-          <div>{p.breed_name}{p.flock_count ? ` · ${p.flock_count.toLocaleString()} birds` : ""}</div>
-        </div>
-        <div>
-          <div style={{ color: "var(--text-3)" }}>Location</div>
-          <div className="font-medium" style={{ color: "var(--text)" }}>{p.farm_name}</div>
-          <div>{p.house_name}</div>
-        </div>
-        <div>
-          <div style={{ color: "var(--text-3)" }}>Administration</div>
-          <div className="font-medium" style={{ color: "var(--text)" }}>
-            {p.administration ?? "—"}{p.dose ? ` · ${p.dose}` : ""}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 border-t pt-3 text-[12px]" style={{ borderColor: "var(--divider)" }}>
-        <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-3)" }}>
-          Indication
-        </div>
-        <div className="mt-0.5 italic" style={{ color: "var(--text)" }}>
-          {p.indication || "Not recorded"}
-        </div>
-      </div>
-
-      <div className="mt-3 border-t pt-2 text-[11px]"
-           style={{ borderColor: "var(--divider)", color: "var(--text-3)" }}>
-        Prescribed by <strong style={{ color: "var(--text-2)" }}>{p.vet_name}</strong>
-        {p.vet_license && <span> · License {p.vet_license}</span>}
-      </div>
-    </div>
   );
 }
