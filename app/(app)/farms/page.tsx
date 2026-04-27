@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Topbar } from "@/components/ui/topbar";
-import { FarmsFilters } from "@/components/farms/farms-filters";
+import { computeAlerts, alertsCountByFarm } from "@/lib/alerts";
 import { IconHome, IconArrowRight } from "@/components/ui/icons";
 
 interface FarmRow {
   id: string;
   name: string;
-  reference_id: string | null;
-  complex: { name: string | null; kind: string | null } | null;
-  region: { name: string | null } | null;
+  address: string | null;
+  region: string | null;
+  hasLocation: boolean;
   housesCount: number;
   activeFlocksCount: number;
   openAlertsCount: number;
@@ -19,12 +19,11 @@ interface FarmRow {
 export default async function FarmsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; region?: string; complex?: string }>;
+  searchParams: Promise<{ q?: string; region?: string }>;
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim().toLowerCase();
   const regionFilter = params.region ?? "";
-  const complexFilter = params.complex ?? "";
 
   const supabase = await createClient();
 
@@ -38,78 +37,39 @@ export default async function FarmsPage({
 
   const clientId = membership!.client_id;
 
-  const [farmsRes, regionsRes, complexesRes] = await Promise.all([
+  const [farmsRes, visitsRes, alerts] = await Promise.all([
     supabase
       .from("farms")
       .select(`
-        id, name, reference_id, complex_id, region_id,
-        complexes(name, kind),
-        regions(name)
+        id, name, address, region, latitude, longitude,
+        houses(id, archived_at, flocks(id, active))
       `)
       .eq("client_id", clientId)
-      .is("archived_at", null)
       .order("name", { ascending: true }),
-
-    supabase
-      .from("regions")
-      .select("id, name")
-      .eq("client_id", clientId)
-      .order("name"),
-
-    supabase
-      .from("complexes")
-      .select("id, name")
-      .eq("client_id", clientId)
-      .order("name"),
-  ]);
-
-  const farms = farmsRes.data ?? [];
-  const farmIds = farms.map(f => f.id);
-  const safeFarmIds = farmIds.length ? farmIds : ["00000000-0000-0000-0000-000000000000"];
-
-  const [housesRes, flocksRes, alertsRes, visitsRes] = await Promise.all([
-    supabase
-      .from("houses")
-      .select("farm_id")
-      .in("farm_id", safeFarmIds)
-      .is("archived_at", null),
-
-    supabase
-      .from("flocks")
-      .select("id, houses!inner(farm_id)")
-      .eq("active", true)
-      .in("houses.farm_id", safeFarmIds),
-
-    supabase
-      .from("alerts")
-      .select("farm_id, severity")
-      .eq("client_id", clientId)
-      .eq("status", "open"),
 
     supabase
       .from("visits")
       .select("farm_id, scheduled_at, status")
       .eq("client_id", clientId)
+      .eq("status", "completed")
       .order("scheduled_at", { ascending: false }),
+
+    computeAlerts(clientId),
   ]);
 
-  const housesByFarm = new Map<string, number>();
-  for (const h of housesRes.data ?? []) {
-    housesByFarm.set(h.farm_id, (housesByFarm.get(h.farm_id) ?? 0) + 1);
-  }
-
-  const flocksByFarm = new Map<string, number>();
-  for (const f of (flocksRes.data ?? []) as { houses: { farm_id: string } | { farm_id: string }[] }[]) {
-    const house = Array.isArray(f.houses) ? f.houses[0] : f.houses;
-    if (!house) continue;
-    flocksByFarm.set(house.farm_id, (flocksByFarm.get(house.farm_id) ?? 0) + 1);
-  }
-
-  const alertsByFarm = new Map<string, number>();
-  for (const a of alertsRes.data ?? []) {
-    if (!a.farm_id) continue;
-    alertsByFarm.set(a.farm_id, (alertsByFarm.get(a.farm_id) ?? 0) + 1);
-  }
+  const farms = (farmsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    address: string | null;
+    region: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    houses: Array<{
+      id: string;
+      archived_at: string | null;
+      flocks: Array<{ id: string; active: boolean }> | null;
+    }> | null;
+  }>;
 
   const lastVisitByFarm = new Map<string, string>();
   for (const v of visitsRes.data ?? []) {
@@ -119,30 +79,50 @@ export default async function FarmsPage({
     }
   }
 
-  const rows: FarmRow[] = farms.map(f => {
-    const complex = Array.isArray(f.complexes) ? f.complexes[0] : f.complexes;
-    const region = Array.isArray(f.regions) ? f.regions[0] : f.regions;
+  const alertCountByFarm = alertsCountByFarm(alerts);
+
+  const rows: FarmRow[] = farms.map(function (f) {
+    const houses = (f.houses ?? []).filter(function (h) { return h.archived_at === null; });
+    const allFlocks = houses.flatMap(function (h) { return h.flocks ?? []; });
+    const activeFlocks = allFlocks.filter(function (fl) { return fl.active; });
+    const farmAlerts = alertCountByFarm.get(f.id) ?? { high: 0, medium: 0, low: 0 };
+
     return {
       id: f.id,
       name: f.name,
-      reference_id: f.reference_id,
-      complex: complex ? { name: complex.name ?? null, kind: complex.kind ?? null } : null,
-      region: region ? { name: region.name ?? null } : null,
-      housesCount: housesByFarm.get(f.id) ?? 0,
-      activeFlocksCount: flocksByFarm.get(f.id) ?? 0,
-      openAlertsCount: alertsByFarm.get(f.id) ?? 0,
+      address: f.address,
+      region: f.region,
+      hasLocation: f.latitude !== null && f.longitude !== null,
+      housesCount: houses.length,
+      activeFlocksCount: activeFlocks.length,
+      openAlertsCount: farmAlerts.high + farmAlerts.medium,
       lastVisitAt: lastVisitByFarm.get(f.id) ?? null,
     };
   });
 
-  const filtered = rows.filter(r => {
-    if (q && !r.name.toLowerCase().includes(q) && !r.reference_id?.toLowerCase().includes(q)) return false;
-    if (regionFilter && r.region?.name !== regionFilter) return false;
-    if (complexFilter && r.complex?.name !== complexFilter) return false;
+  // unique regions for the filter
+  const allRegions = Array.from(new Set(
+    rows.map(function (r) { return r.region; })
+        .filter(function (r): r is string { return r !== null && r.trim() !== ""; })
+  )).sort();
+
+  const filtered = rows.filter(function (r) {
+    if (q && !r.name.toLowerCase().includes(q) && !(r.address?.toLowerCase().includes(q) ?? false)) return false;
+    if (regionFilter && r.region !== regionFilter) return false;
     return true;
   });
 
-  const totalActive = rows.reduce((sum, r) => sum + r.activeFlocksCount, 0);
+  const totalActive = rows.reduce(function (sum, r) { return sum + r.activeFlocksCount; }, 0);
+
+  function buildHref(patch: { q?: string; region?: string }): string {
+    const sp = new URLSearchParams();
+    const newQ = patch.q !== undefined ? patch.q : q;
+    const newRegion = patch.region !== undefined ? patch.region : regionFilter;
+    if (newQ) sp.set("q", newQ);
+    if (newRegion) sp.set("region", newRegion);
+    const qs = sp.toString();
+    return qs ? `/farms?${qs}` : "/farms";
+  }
 
   return (
     <>
@@ -155,7 +135,7 @@ export default async function FarmsPage({
           <div>
             <h1>Farms</h1>
             <div className="page-header__sub">
-              {filtered.length} of {rows.length} farms · {totalActive} active flocks across the operation
+              {filtered.length} of {rows.length} farm{rows.length === 1 ? "" : "s"} - {totalActive} active flock{totalActive === 1 ? "" : "s"}
             </div>
           </div>
           <Link href="/farms/new" className="btn btn--primary">
@@ -163,21 +143,70 @@ export default async function FarmsPage({
           </Link>
         </div>
 
-        <FarmsFilters
-          regions={(regionsRes.data ?? []).map(r => r.name)}
-          complexes={(complexesRes.data ?? []).map(c => c.name)}
-          currentQ={q}
-          currentRegion={regionFilter}
-          currentComplex={complexFilter}
-        />
+        {/* Inline filters */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <form action="/farms" method="GET" className="flex items-center gap-2">
+            <input
+              type="text"
+              name="q"
+              defaultValue={q}
+              placeholder="Search farms..."
+              className="input"
+              style={{ width: 220, fontSize: 12 }}
+            />
+            {regionFilter ? (
+              <input type="hidden" name="region" value={regionFilter} />
+            ) : null}
+            <button type="submit" className="btn" style={{ fontSize: 11 }}>Search</button>
+          </form>
 
-        <div className="card mt-5">
+          {allRegions.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-wider"
+                    style={{ color: "var(--text-3)" }}>
+                Region:
+              </span>
+              <Link
+                href={buildHref({ region: "" })}
+                className="rounded-full px-2.5 py-0.5 text-[11px]"
+                style={{
+                  background: regionFilter === "" ? "var(--green-100)" : "var(--surface-2)",
+                  color: regionFilter === "" ? "var(--green-700)" : "var(--text-2)",
+                  border: `1px solid ${regionFilter === "" ? "var(--green-700)" : "transparent"}`,
+                }}
+              >
+                All
+              </Link>
+              {allRegions.map(function (r) {
+                const isActive = regionFilter === r;
+                return (
+                  <Link
+                    key={r}
+                    href={buildHref({ region: r })}
+                    className="rounded-full px-2.5 py-0.5 text-[11px]"
+                    style={{
+                      background: isActive ? "var(--green-100)" : "var(--surface-2)",
+                      color: isActive ? "var(--green-700)" : "var(--text-2)",
+                      border: `1px solid ${isActive ? "var(--green-700)" : "transparent"}`,
+                    }}
+                  >
+                    {r}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="card">
           {filtered.length === 0 ? (
             <div className="px-5 py-14 text-center text-sm" style={{ color: "var(--text-2)" }}>
               {rows.length === 0 ? (
                 <>
                   No farms yet.{" "}
-                  <Link href="/farms/new" style={{ color: "var(--green-700)" }}>Add your first farm →</Link>
+                  <Link href="/farms/new" style={{ color: "var(--green-700)" }}>
+                    Add your first farm
+                  </Link>
                 </>
               ) : (
                 <>No farms match your filters.</>
@@ -191,20 +220,20 @@ export default async function FarmsPage({
                   borderColor: "var(--divider)",
                   background: "var(--surface-2)",
                   color: "var(--text-3)",
-                  gridTemplateColumns: "2fr 1.2fr 1fr 80px 80px 110px 32px",
+                  gridTemplateColumns: "2fr 1.2fr 1fr 80px 80px 100px 32px",
                 }}
               >
                 <div>Farm</div>
-                <div>Region · Complex</div>
+                <div>Region</div>
                 <div>Last visit</div>
                 <div className="text-right">Houses</div>
-                <div className="text-right">Active flocks</div>
+                <div className="text-right">Active</div>
                 <div className="text-right">Alerts</div>
                 <div></div>
               </div>
-              {filtered.map(row => (
-                <FarmRowCard key={row.id} row={row} />
-              ))}
+              {filtered.map(function (row) {
+                return <FarmRowCard key={row.id} row={row} />;
+              })}
             </div>
           )}
         </div>
@@ -213,8 +242,9 @@ export default async function FarmsPage({
   );
 }
 
-function FarmRowCard({ row }: { row: FarmRow }) {
-  const lastVisit = row.lastVisitAt ? relativeDays(row.lastVisitAt) : "—";
+function FarmRowCard(props: { row: FarmRow }) {
+  const row = props.row;
+  const lastVisit = row.lastVisitAt ? relativeDays(row.lastVisitAt) : "Never";
   const lastVisitTone = row.lastVisitAt ? toneForLastVisit(row.lastVisitAt) : "var(--text-3)";
 
   return (
@@ -223,7 +253,7 @@ function FarmRowCard({ row }: { row: FarmRow }) {
       className="grid items-center gap-4 border-b px-5 py-3.5 last:border-b-0 hover:bg-surface-2"
       style={{
         borderColor: "var(--divider)",
-        gridTemplateColumns: "2fr 1.2fr 1fr 80px 80px 110px 32px",
+        gridTemplateColumns: "2fr 1.2fr 1fr 80px 80px 100px 32px",
       }}
     >
       <div className="min-w-0">
@@ -231,28 +261,45 @@ function FarmRowCard({ row }: { row: FarmRow }) {
           <IconHome size={14} />
           <span className="truncate text-[13px] font-medium">{row.name}</span>
         </div>
-        {row.reference_id && (
-          <div className="ml-[22px] mt-0.5 font-mono text-[11px]" style={{ color: "var(--text-3)" }}>
-            {row.reference_id}
+        {row.address ? (
+          <div className="ml-[22px] mt-0.5 truncate text-[11px]"
+               style={{ color: "var(--text-3)" }}>
+            {row.address}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="min-w-0 text-[12px]" style={{ color: "var(--text-2)" }}>
-        <div className="truncate">{row.region?.name ?? "—"}</div>
-        <div className="truncate text-[11px]" style={{ color: "var(--text-3)" }}>
-          {row.complex?.name ?? "—"}
-        </div>
+        <div className="truncate">{row.region ?? "-"}</div>
+        {!row.hasLocation ? (
+          <div className="truncate text-[10px]" style={{ color: "var(--orange-500)" }}>
+            No location set
+          </div>
+        ) : null}
       </div>
       <div className="font-mono text-[12px]" style={{ color: lastVisitTone }}>
         {lastVisit}
       </div>
       <div className="text-right font-mono text-[13px] tabular-nums">{row.housesCount}</div>
-      <div className="text-right font-mono text-[13px] tabular-nums">{row.activeFlocksCount}</div>
+      <div className="text-right font-mono text-[13px] tabular-nums">
+        {row.activeFlocksCount > 0 ? (
+          <span style={{ color: "var(--ok)" }}>{row.activeFlocksCount}</span>
+        ) : (
+          <span style={{ color: "var(--text-3)" }}>0</span>
+        )}
+      </div>
       <div className="text-right">
         {row.openAlertsCount > 0 ? (
-          <span className="pill pill--bad">{row.openAlertsCount} open</span>
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+            style={{
+              background: "#fbe6e3",
+              color: "#a02020",
+            }}
+          >
+            {row.openAlertsCount} alert{row.openAlertsCount === 1 ? "" : "s"}
+          </span>
         ) : (
-          <span style={{ color: "var(--text-3)" }}>—</span>
+          <span style={{ color: "var(--text-3)" }}>-</span>
         )}
       </div>
       <div className="text-right" style={{ color: "var(--text-3)" }}>
