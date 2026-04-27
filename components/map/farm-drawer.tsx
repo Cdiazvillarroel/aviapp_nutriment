@@ -59,7 +59,7 @@ export function FarmDrawer({ farm, onClose }: Props) {
           style={{ color: "var(--text-3)" }}
           aria-label="Close"
         >
-          ×
+          {"\u00D7"}
         </button>
       </div>
 
@@ -80,7 +80,7 @@ export function FarmDrawer({ farm, onClose }: Props) {
           <StatBox
             label="Last visit"
             value={lastVisitText}
-            sub={farm.last_visit_type ?? "—"}
+            sub={farm.last_visit_type ?? "-"}
           />
         </div>
 
@@ -147,7 +147,7 @@ export function FarmDrawer({ farm, onClose }: Props) {
             rel="noopener noreferrer"
             className="btn w-full justify-center"
           >
-            Get directions ↗
+            {"Get directions \u2197"}
           </a>
         </div>
       </div>
