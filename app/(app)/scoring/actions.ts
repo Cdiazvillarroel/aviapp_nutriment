@@ -23,26 +23,38 @@ async function resolveContext() {
 export async function upsertScore(input: {
   visitId: string;
   flockId: string;
+  birdNumber: number;
   definitionId: string;
-  score: number;
-  notes?: string;
+  fieldType: "score" | "numeric" | "sex";
+  scoreValue?: number | null;
+  numericValue?: number | null;
+  textValue?: string | null;
 }) {
   const { supabase, userId } = await resolveContext();
 
+  const row: Record<string, unknown> = {
+    visit_id: input.visitId,
+    flock_id: input.flockId,
+    bird_number: input.birdNumber,
+    definition_id: input.definitionId,
+    scored_by: userId,
+    scored_at: new Date().toISOString(),
+    score: null,
+    numeric_value: null,
+    text_value: null,
+  };
+
+  if (input.fieldType === "score") {
+    row.score = input.scoreValue ?? null;
+  } else if (input.fieldType === "numeric") {
+    row.numeric_value = input.numericValue ?? null;
+  } else if (input.fieldType === "sex") {
+    row.text_value = input.textValue ?? null;
+  }
+
   const { data, error } = await supabase
     .from("visit_scores")
-    .upsert(
-      {
-        visit_id: input.visitId,
-        flock_id: input.flockId,
-        definition_id: input.definitionId,
-        score: input.score,
-        notes: input.notes ?? null,
-        scored_by: userId,
-        scored_at: new Date().toISOString(),
-      },
-      { onConflict: "visit_id,flock_id,definition_id" }
-    )
+    .upsert(row, { onConflict: "visit_id,flock_id,bird_number,definition_id" })
     .select("id")
     .single();
 
@@ -55,26 +67,14 @@ export async function upsertScore(input: {
   return { ok: true as const, scoreId: data.id };
 }
 
-export async function clearScore(input: {
-  visitId: string;
-  flockId: string;
-  definitionId: string;
-}) {
-  const { supabase, userId } = await resolveContext();
+export async function setBirdCount(visitId: string, count: number) {
+  const { supabase, clientId } = await resolveContext();
 
   const { error } = await supabase
-    .from("visit_scores")
-    .upsert(
-      {
-        visit_id: input.visitId,
-        flock_id: input.flockId,
-        definition_id: input.definitionId,
-        score: null,
-        scored_by: userId,
-        scored_at: null,
-      },
-      { onConflict: "visit_id,flock_id,definition_id" }
-    );
+    .from("visits")
+    .update({ bird_count: count })
+    .eq("id", visitId)
+    .eq("client_id", clientId);
 
   if (error) {
     return { ok: false as const, error: error.message };
@@ -83,6 +83,57 @@ export async function clearScore(input: {
   revalidatePath(`/scoring`);
   return { ok: true as const };
 }
+
+export async function updateVisitTreatment(visitId: string, patch: {
+  coccidiostat?: string | null;
+  other_treatment?: string | null;
+}) {
+  const { supabase, clientId } = await resolveContext();
+
+  const { error } = await supabase
+    .from("visits")
+    .update(patch)
+    .eq("id", visitId)
+    .eq("client_id", clientId);
+
+  if (error) {
+    return { ok: false as const, error: error.message };
+  }
+
+  revalidatePath(`/scoring`);
+  revalidatePath(`/visits/${visitId}`);
+  return { ok: true as const };
+}
+
+export async function deleteBird(visitId: string, birdNumber: number) {
+  const { supabase, clientId } = await resolveContext();
+
+  const { data: visit } = await supabase
+    .from("visits")
+    .select("id")
+    .eq("id", visitId)
+    .eq("client_id", clientId)
+    .maybeSingle();
+
+  if (!visit) {
+    return { ok: false as const, error: "Visit not found" };
+  }
+
+  const { error } = await supabase
+    .from("visit_scores")
+    .delete()
+    .eq("visit_id", visitId)
+    .eq("bird_number", birdNumber);
+
+  if (error) {
+    return { ok: false as const, error: error.message };
+  }
+
+  revalidatePath(`/scoring`);
+  return { ok: true as const };
+}
+
+// --- Photo handling ----------------------------
 
 export async function uploadPhoto(formData: FormData) {
   const { supabase, userId } = await resolveContext();
@@ -94,7 +145,6 @@ export async function uploadPhoto(formData: FormData) {
   if (!visitScoreId || !visitId || !file) {
     return { ok: false as const, error: "Missing fields" };
   }
-
   if (!file.type.startsWith("image/")) {
     return { ok: false as const, error: "File must be an image" };
   }
@@ -107,25 +157,16 @@ export async function uploadPhoto(formData: FormData) {
   const path = `${visitId}/${visitScoreId}/${filename}`;
 
   const arrayBuffer = await file.arrayBuffer();
-
   const { error: uploadErr } = await supabase.storage
     .from("visit-photos")
-    .upload(path, arrayBuffer, {
-      contentType: file.type,
-      upsert: false,
-    });
-
+    .upload(path, arrayBuffer, { contentType: file.type, upsert: false });
   if (uploadErr) {
     return { ok: false as const, error: uploadErr.message };
   }
 
   const { data: photo, error: insertErr } = await supabase
     .from("photos")
-    .insert({
-      visit_score_id: visitScoreId,
-      storage_path: path,
-      uploaded_by: userId,
-    })
+    .insert({ visit_score_id: visitScoreId, storage_path: path, uploaded_by: userId })
     .select("id, storage_path")
     .single();
 
@@ -139,13 +180,7 @@ export async function uploadPhoto(formData: FormData) {
     .createSignedUrl(path, 3600);
 
   revalidatePath(`/scoring`);
-  return {
-    ok: true as const,
-    photo: {
-      id: photo.id,
-      url: signed?.signedUrl ?? "",
-    },
-  };
+  return { ok: true as const, photo: { id: photo.id, url: signed?.signedUrl ?? "" } };
 }
 
 export async function deletePhoto(input: { photoId: string }) {
