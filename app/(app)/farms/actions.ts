@@ -1,76 +1,243 @@
-create table if not exists farm_contacts (
-  id          uuid primary key default gen_random_uuid(),
-  farm_id     uuid not null references farms(id) on delete cascade,
-  role        text not null,
-  name        text not null,
-  phone       text,
-  email       text,
-  notes       text,
-  display_order int not null default 0,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
+"use server";
 
-create index if not exists farm_contacts_farm_id_idx on farm_contacts(farm_id);
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
 
-alter table farm_contacts enable row level security;
+async function resolveContext() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-drop policy if exists "Farm contacts: members can read" on farm_contacts;
-create policy "Farm contacts: members can read"
-  on farm_contacts for select
-  using (
-    farm_id in (
-      select id from farms
-      where client_id in (select client_id from client_members where user_id = auth.uid())
-    )
-  );
+  const { data: membership } = await supabase
+    .from("client_members")
+    .select("client_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .single();
 
-drop policy if exists "Farm contacts: members can insert" on farm_contacts;
-create policy "Farm contacts: members can insert"
-  on farm_contacts for insert
-  with check (
-    farm_id in (
-      select id from farms
-      where client_id in (select client_id from client_members where user_id = auth.uid())
-    )
-  );
+  if (!membership) throw new Error("No client membership");
+  return { supabase, clientId: membership.client_id, userId: user.id };
+}
 
-drop policy if exists "Farm contacts: members can update" on farm_contacts;
-create policy "Farm contacts: members can update"
-  on farm_contacts for update
-  using (
-    farm_id in (
-      select id from farms
-      where client_id in (select client_id from client_members where user_id = auth.uid())
-    )
-  );
+interface HouseInput {
+  id: string | null;
+  name: string;
+  custom_id: string;
+  length_m: number | null;
+  width_m: number | null;
+  drink_system: string | null;
+  feed_system: string | null;
+  housing_system: string | null;
+  capacity: number | null;
+  archived: boolean;
+}
 
-drop policy if exists "Farm contacts: members can delete" on farm_contacts;
-create policy "Farm contacts: members can delete"
-  on farm_contacts for delete
-  using (
-    farm_id in (
-      select id from farms
-      where client_id in (select client_id from client_members where user_id = auth.uid())
-    )
-  );
+interface ContactInput {
+  id: string | null;
+  role: string;
+  name: string;
+  phone: string;
+  email: string;
+  notes: string;
+  archived: boolean;
+}
 
-do $$
-declare
-  v_farm_id uuid;
-begin
-  if not exists (select 1 from farm_contacts) then
-    select id into v_farm_id
-    from farms
-    where client_id = '11111111-1111-1111-1111-111111111111'
-    order by created_at
-    limit 1;
+function parseLatLng(formData: FormData): { lat: number | null; lng: number | null } {
+  const latRaw = (formData.get("latitude") as string | null) ?? "";
+  const lngRaw = (formData.get("longitude") as string | null) ?? "";
+  const lat = latRaw.trim() === "" ? null : parseFloat(latRaw);
+  const lng = lngRaw.trim() === "" ? null : parseFloat(lngRaw);
+  if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) return { lat: null, lng: null };
+  if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) return { lat: null, lng: null };
+  return { lat, lng };
+}
 
-    if v_farm_id is not null then
-      insert into farm_contacts (farm_id, role, name, phone, email, display_order) values
-        (v_farm_id, 'Farm Manager',  'David Robertson', '+61 412 345 678', 'd.robertson@bendigopoultry.au', 0),
-        (v_farm_id, 'Owner',         'Margaret Chen',   '+61 423 567 890', 'm.chen@example.au',             1),
-        (v_farm_id, 'Feed Supplier', 'Riverina Stockfeeds', '+61 3 5443 1100', 'orders@riverinastock.au',  2);
-    end if;
-  end if;
-end $$;
+export async function createFarm(formData: FormData) {
+  const { supabase, clientId } = await resolveContext();
+
+  const name = String(formData.get("name") ?? "").trim();
+  const address = String(formData.get("address") ?? "").trim() || null;
+  const region = String(formData.get("region") ?? "").trim() || null;
+  if (!name) {
+    return { ok: false as const, error: "Farm name is required" };
+  }
+
+  const { lat, lng } = parseLatLng(formData);
+
+  const { data: farm, error } = await supabase
+    .from("farms")
+    .insert({
+      client_id: clientId,
+      name,
+      address,
+      region,
+      latitude: lat,
+      longitude: lng,
+    })
+    .select("id")
+    .single();
+
+  if (error || !farm) {
+    return { ok: false as const, error: error?.message ?? "Could not create farm" };
+  }
+
+  const housesRaw = String(formData.get("houses_json") ?? "[]");
+  let houses: HouseInput[] = [];
+  try {
+    houses = JSON.parse(housesRaw);
+  } catch {
+    houses = [];
+  }
+  const housesToInsert = houses
+    .filter(function (h) { return !h.archived && h.name.trim() !== ""; })
+    .map(function (h) {
+      return {
+        farm_id: farm.id,
+        name: h.name.trim(),
+        custom_id: h.custom_id.trim() || null,
+        length_m: h.length_m,
+        width_m: h.width_m,
+        drink_system: h.drink_system,
+        feed_system: h.feed_system,
+        housing_system: h.housing_system,
+        capacity: h.capacity,
+      };
+    });
+  if (housesToInsert.length > 0) {
+    await supabase.from("houses").insert(housesToInsert);
+  }
+
+  await syncContacts(supabase, farm.id, formData);
+
+  revalidatePath("/farms");
+  redirect(`/farms/${farm.id}`);
+}
+
+export async function updateFarm(farmId: string, formData: FormData) {
+  const { supabase, clientId } = await resolveContext();
+
+  const name = String(formData.get("name") ?? "").trim();
+  const address = String(formData.get("address") ?? "").trim() || null;
+  const region = String(formData.get("region") ?? "").trim() || null;
+  if (!name) {
+    return { ok: false as const, error: "Farm name is required" };
+  }
+
+  const { lat, lng } = parseLatLng(formData);
+
+  const { error: farmErr } = await supabase
+    .from("farms")
+    .update({ name, address, region, latitude: lat, longitude: lng })
+    .eq("id", farmId)
+    .eq("client_id", clientId);
+
+  if (farmErr) {
+    return { ok: false as const, error: farmErr.message };
+  }
+
+  const housesRaw = String(formData.get("houses_json") ?? "[]");
+  let houses: HouseInput[] = [];
+  try {
+    houses = JSON.parse(housesRaw);
+  } catch {
+    houses = [];
+  }
+  for (const h of houses) {
+    if (h.id) {
+      if (h.archived) {
+        await supabase
+          .from("houses")
+          .update({ archived_at: new Date().toISOString() })
+          .eq("id", h.id);
+      } else {
+        await supabase
+          .from("houses")
+          .update({
+            name: h.name.trim(),
+            custom_id: h.custom_id.trim() || null,
+            length_m: h.length_m,
+            width_m: h.width_m,
+            drink_system: h.drink_system,
+            feed_system: h.feed_system,
+            housing_system: h.housing_system,
+            capacity: h.capacity,
+            archived_at: null,
+          })
+          .eq("id", h.id);
+      }
+    } else {
+      if (!h.archived && h.name.trim() !== "") {
+        await supabase.from("houses").insert({
+          farm_id: farmId,
+          name: h.name.trim(),
+          custom_id: h.custom_id.trim() || null,
+          length_m: h.length_m,
+          width_m: h.width_m,
+          drink_system: h.drink_system,
+          feed_system: h.feed_system,
+          housing_system: h.housing_system,
+          capacity: h.capacity,
+        });
+      }
+    }
+  }
+
+  await syncContacts(supabase, farmId, formData);
+
+  revalidatePath(`/farms/${farmId}`);
+  revalidatePath(`/farms`);
+  redirect(`/farms/${farmId}`);
+}
+
+async function syncContacts(supabase: Awaited<ReturnType<typeof createClient>>, farmId: string, formData: FormData) {
+  const raw = String(formData.get("contacts_json") ?? "[]");
+  let contacts: ContactInput[] = [];
+  try {
+    contacts = JSON.parse(raw);
+  } catch {
+    contacts = [];
+  }
+
+  let order = 0;
+  for (const c of contacts) {
+    if (c.id) {
+      if (c.archived) {
+        await supabase.from("farm_contacts").delete().eq("id", c.id);
+      } else if (c.name.trim() !== "" || c.role.trim() !== "") {
+        await supabase
+          .from("farm_contacts")
+          .update({
+            role: c.role.trim() || "Contact",
+            name: c.name.trim(),
+            phone: c.phone.trim() || null,
+            email: c.email.trim() || null,
+            notes: c.notes.trim() || null,
+            display_order: order,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", c.id);
+      }
+    } else {
+      if (!c.archived && (c.name.trim() !== "" || c.role.trim() !== "")) {
+        await supabase.from("farm_contacts").insert({
+          farm_id: farmId,
+          role: c.role.trim() || "Contact",
+          name: c.name.trim(),
+          phone: c.phone.trim() || null,
+          email: c.email.trim() || null,
+          notes: c.notes.trim() || null,
+          display_order: order,
+        });
+      }
+    }
+    order += 1;
+  }
+}
+
+export async function deleteFarm(farmId: string) {
+  const { supabase, clientId } = await resolveContext();
+  await supabase.from("farms").delete().eq("id", farmId).eq("client_id", clientId);
+  revalidatePath("/farms");
+  redirect("/farms");
+}
