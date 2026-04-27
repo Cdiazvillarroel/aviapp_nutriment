@@ -150,6 +150,9 @@ export default async function FarmDetailPage({
                 <IconHome size={16} />
                 Houses & flocks
               </h2>
+              <Link href={`/flocks/new?farm=${farm.id}`} className="card__action">
+                + Place flock
+              </Link>
             </div>
             <div className="card__body card__body--flush">
               {houses.length === 0 ? (
@@ -163,6 +166,7 @@ export default async function FarmDetailPage({
                 houses.map(h => {
                   const flocks = Array.isArray(h.flocks) ? h.flocks : [];
                   const activeFlocks = flocks.filter(f => f.active);
+                  const isEmpty = activeFlocks.length === 0;
                   return (
                     <div
                       key={h.id}
@@ -171,11 +175,22 @@ export default async function FarmDetailPage({
                     >
                       <div className="flex items-center justify-between">
                         <div className="text-[13px] font-medium">{h.name}</div>
-                        <div className="font-mono text-[11px]" style={{ color: "var(--text-3)" }}>
-                          cap. {h.capacity?.toLocaleString() ?? "—"}
+                        <div className="flex items-center gap-3">
+                          <div className="font-mono text-[11px]" style={{ color: "var(--text-3)" }}>
+                            cap. {h.capacity?.toLocaleString() ?? "—"}
+                          </div>
+                          {isEmpty && (
+                            <Link
+                              href={`/flocks/new?farm=${farm.id}&house=${h.id}`}
+                              className="text-[11px]"
+                              style={{ color: "var(--green-700)" }}
+                            >
+                              + Place flock
+                            </Link>
+                          )}
                         </div>
                       </div>
-                      {activeFlocks.length === 0 ? (
+                      {isEmpty ? (
                         <div className="mt-1 text-[12px]" style={{ color: "var(--text-3)" }}>Empty</div>
                       ) : (
                         <div className="mt-2 flex flex-wrap gap-2">
