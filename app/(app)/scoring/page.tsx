@@ -29,10 +29,7 @@ export default async function ScoringPage({
 
     const { data: candidates } = await supabase
       .from("visits")
-      .select(`
-        id, scheduled_at, status,
-        farms(name)
-      `)
+      .select(`id, scheduled_at, status, farms(name)`)
       .eq("client_id", clientId)
       .gte("scheduled_at", startOfDay.toISOString())
       .lte("scheduled_at", endOfDay.toISOString())
@@ -41,7 +38,6 @@ export default async function ScoringPage({
     return (
       <>
         <Topbar crumbs={[{ label: "Dashboard", href: "/dashboard" }, { label: "Scoring" }]} />
-
         <div className="w-full max-w-[720px] px-8 pb-14 pt-7">
           <div className="page-header">
             <div>
@@ -51,7 +47,6 @@ export default async function ScoringPage({
               </div>
             </div>
           </div>
-
           <div className="card">
             <div className="card__header">
               <h2 className="card__title">
@@ -101,10 +96,10 @@ export default async function ScoringPage({
     supabase
       .from("visits")
       .select(`
-        id, status,
+        id, status, scheduled_at, coccidiostat, other_treatment, bird_count,
         farms(name),
         visit_flocks(
-          flocks(id, reference, placement_date, houses(name))
+          flocks(id, reference, placement_date, breeds(name), houses(name))
         )
       `)
       .eq("id", visitId)
@@ -113,13 +108,14 @@ export default async function ScoringPage({
 
     supabase
       .from("scoring_definitions")
-      .select("id, section, name, scale_max, display_order")
-      .order("display_order"),
+      .select("id, name, scale_max, module, module_order, order_in_module, field_type")
+      .order("module_order")
+      .order("order_in_module"),
 
     supabase
       .from("visit_scores")
       .select(`
-        id, score, notes, flock_id, definition_id,
+        id, score, numeric_value, text_value, flock_id, bird_number, definition_id,
         photos(id, storage_path)
       `)
       .eq("visit_id", visitId),
@@ -145,17 +141,27 @@ export default async function ScoringPage({
 
   const visit = visitRes.data;
   const farm = Array.isArray(visit.farms) ? visit.farms[0] : visit.farms;
-  const definitions = definitionsRes.data ?? [];
+  const definitions = (definitionsRes.data ?? []).map(d => ({
+    id: d.id,
+    name: d.name,
+    scale_max: d.scale_max,
+    module: d.module ?? "Other",
+    module_order: d.module_order ?? 0,
+    order_in_module: d.order_in_module ?? 0,
+    field_type: (d.field_type ?? "score") as "score" | "numeric" | "sex",
+  }));
 
   const visitFlocks = Array.isArray(visit.visit_flocks) ? visit.visit_flocks : [];
   const flocks = visitFlocks.map(vf => {
     const fl = Array.isArray(vf.flocks) ? vf.flocks[0] : vf.flocks;
     if (!fl) return null;
+    const breed = Array.isArray(fl.breeds) ? fl.breeds[0] : fl.breeds;
     const house = Array.isArray(fl.houses) ? fl.houses[0] : fl.houses;
     return {
       id: fl.id,
       reference: fl.reference,
       house_name: house?.name ?? "—",
+      breed_name: breed?.name ?? null,
       age_days: Math.round((Date.now() - new Date(fl.placement_date).getTime()) / 86_400_000),
     };
   }).filter((f): f is NonNullable<typeof f> => f !== null);
@@ -174,14 +180,20 @@ export default async function ScoringPage({
       );
       return {
         flockId: s.flock_id ?? "",
+        birdNumber: s.bird_number ?? 1,
         definitionId: s.definition_id,
         scoreId: s.id,
         score: s.score,
-        notes: s.notes,
+        numericValue: s.numeric_value,
+        textValue: s.text_value,
         photos,
       };
     })
   );
+
+  const visitDate = new Date(visit.scheduled_at).toLocaleDateString("en-AU", {
+    day: "2-digit", month: "long", year: "numeric",
+  });
 
   return (
     <>
@@ -193,11 +205,16 @@ export default async function ScoringPage({
           { label: "Scoring" },
         ]}
       />
-
       <div className="w-full max-w-[1280px] px-8 pb-14 pt-7">
         <ScoringClient
           visitId={visitId}
           visitFarmName={farm?.name ?? "Unknown farm"}
+          visitDate={visitDate}
+          initialBirdCount={visit.bird_count ?? 5}
+          initialTreatment={{
+            coccidiostat: visit.coccidiostat ?? null,
+            other_treatment: visit.other_treatment ?? null,
+          }}
           flocks={flocks}
           definitions={definitions}
           initialScores={initialScores}
