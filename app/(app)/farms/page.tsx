@@ -37,70 +37,87 @@ export default async function FarmsPage({
 
   const clientId = membership!.client_id;
 
-  const [farmsRes, visitsRes, alerts] = await Promise.all([
-    supabase
-      .from("farms")
-      .select(`
-        id, name, address, region, latitude, longitude,
-        houses(id, archived_at, flocks(id, active))
-      `)
-      .eq("client_id", clientId)
-      .order("name", { ascending: true }),
+  // Step 1: just the farms (no joins)
+  const { data: farmsData, error: farmsErr } = await supabase
+    .from("farms")
+    .select("id, name, address, region, latitude, longitude")
+    .eq("client_id", clientId)
+    .order("name", { ascending: true });
 
-    supabase
-      .from("visits")
-      .select("farm_id, scheduled_at, status")
-      .eq("client_id", clientId)
-      .eq("status", "completed")
-      .order("scheduled_at", { ascending: false }),
+  if (farmsErr) {
+    return (
+      <div className="p-8">
+        <pre style={{ background: "#fbe6e3", padding: 16, borderRadius: 6 }}>
+          Error fetching farms: {JSON.stringify(farmsErr, null, 2)}
+        </pre>
+      </div>
+    );
+  }
 
-    computeAlerts(clientId),
-  ]);
+  const farms = farmsData ?? [];
+  const farmIds = farms.map(function (f) { return f.id; });
+  const safeFarmIds = farmIds.length > 0 ? farmIds : ["00000000-0000-0000-0000-000000000000"];
 
-  const farms = (farmsRes.data ?? []) as Array<{
-    id: string;
-    name: string;
-    address: string | null;
-    region: string | null;
-    latitude: number | null;
-    longitude: number | null;
-    houses: Array<{
-      id: string;
-      archived_at: string | null;
-      flocks: Array<{ id: string; active: boolean }> | null;
-    }> | null;
-  }>;
+  // Step 2: houses (separate query)
+  const { data: housesData } = await supabase
+    .from("houses")
+    .select("id, farm_id, archived_at")
+    .in("farm_id", safeFarmIds);
+
+  const housesByFarm = new Map<string, number>();
+  for (const h of housesData ?? []) {
+    if (h.archived_at !== null) continue;
+    housesByFarm.set(h.farm_id, (housesByFarm.get(h.farm_id) ?? 0) + 1);
+  }
+
+  // Step 3: active flocks count per farm (separate query)
+  const { data: flocksData } = await supabase
+    .from("flocks")
+    .select("id, active, house_id, houses(farm_id)")
+    .eq("active", true);
+
+  const flocksByFarm = new Map<string, number>();
+  for (const fl of (flocksData ?? []) as Array<{ houses: { farm_id: string } | { farm_id: string }[] | null }>) {
+    const house = Array.isArray(fl.houses) ? fl.houses[0] : fl.houses;
+    if (!house) continue;
+    flocksByFarm.set(house.farm_id, (flocksByFarm.get(house.farm_id) ?? 0) + 1);
+  }
+
+  // Step 4: last completed visit per farm
+  const { data: visitsData } = await supabase
+    .from("visits")
+    .select("farm_id, scheduled_at")
+    .eq("client_id", clientId)
+    .eq("status", "completed")
+    .order("scheduled_at", { ascending: false });
 
   const lastVisitByFarm = new Map<string, string>();
-  for (const v of visitsRes.data ?? []) {
+  for (const v of visitsData ?? []) {
     if (!v.farm_id) continue;
     if (!lastVisitByFarm.has(v.farm_id)) {
       lastVisitByFarm.set(v.farm_id, v.scheduled_at);
     }
   }
 
+  // Step 5: alerts (engine)
+  const alerts = await computeAlerts(clientId);
   const alertCountByFarm = alertsCountByFarm(alerts);
 
   const rows: FarmRow[] = farms.map(function (f) {
-    const houses = (f.houses ?? []).filter(function (h) { return h.archived_at === null; });
-    const allFlocks = houses.flatMap(function (h) { return h.flocks ?? []; });
-    const activeFlocks = allFlocks.filter(function (fl) { return fl.active; });
     const farmAlerts = alertCountByFarm.get(f.id) ?? { high: 0, medium: 0, low: 0 };
-
     return {
       id: f.id,
       name: f.name,
       address: f.address,
       region: f.region,
       hasLocation: f.latitude !== null && f.longitude !== null,
-      housesCount: houses.length,
-      activeFlocksCount: activeFlocks.length,
+      housesCount: housesByFarm.get(f.id) ?? 0,
+      activeFlocksCount: flocksByFarm.get(f.id) ?? 0,
       openAlertsCount: farmAlerts.high + farmAlerts.medium,
       lastVisitAt: lastVisitByFarm.get(f.id) ?? null,
     };
   });
 
-  // unique regions for the filter
   const allRegions = Array.from(new Set(
     rows.map(function (r) { return r.region; })
         .filter(function (r): r is string { return r !== null && r.trim() !== ""; })
@@ -143,7 +160,6 @@ export default async function FarmsPage({
           </Link>
         </div>
 
-        {/* Inline filters */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <form action="/farms" method="GET" className="flex items-center gap-2">
             <input
