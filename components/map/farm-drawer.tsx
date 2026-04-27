@@ -14,14 +14,29 @@ function daysSince(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
 
-export function FarmDrawer({ farm, onClose }: Props) {
-  const lastVisitText = farm.last_visit_at
-    ? daysSince(farm.last_visit_at) + " day" + (daysSince(farm.last_visit_at) === 1 ? "" : "s") + " ago"
-    : "Never visited";
+export function FarmDrawer(props: Props) {
+  const farm = props.farm;
+  const onClose = props.onClose;
+
+  const days = farm.last_visit_at ? daysSince(farm.last_visit_at) : null;
+  const lastVisitText =
+    days === null
+      ? "Never visited"
+      : days + " day" + (days === 1 ? "" : "s") + " ago";
 
   const status = STATUS_COLORS[farm.status];
   const statusBg = status.fill + "20";
-  const directionsUrl = "https://www.google.com/maps/dir/?api=1&destination=" + farm.latitude + "," + farm.longitude;
+  const directionsUrl =
+    "https://www.google.com/maps/dir/?api=1&destination=" +
+    farm.latitude +
+    "," +
+    farm.longitude;
+
+  function openDirections() {
+    if (typeof window !== "undefined") {
+      window.open(directionsUrl, "_blank", "noopener,noreferrer");
+    }
+  }
 
   return (
     <div
@@ -58,11 +73,11 @@ export function FarmDrawer({ farm, onClose }: Props) {
           </div>
         </div>
         <button
+          type="button"
           onClick={onClose}
-          className="px-2 py-1 text-[20px] leading-none"
+          className="px-2 py-1 text-[12px] leading-none"
           style={{ color: "var(--text-3)" }}
           aria-label="Close"
-          type="button"
         >
           Close
         </button>
@@ -155,40 +170,31 @@ export function FarmDrawer({ farm, onClose }: Props) {
             <IconReport size={14} />
             Reports
           </Link>
-          
-            href={directionsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={openDirections}
             className="btn w-full justify-center"
           >
             Get directions
-          </a>
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
+function Label(props: { children: React.ReactNode }) {
   return (
     <div
       className="text-[10px] font-medium uppercase tracking-widest"
       style={{ color: "var(--text-3)" }}
     >
-      {children}
+      {props.children}
     </div>
   );
 }
 
-function StatBox({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
+function StatBox(props: { label: string; value: string; sub: string }) {
   return (
     <div
       className="rounded-md border p-3"
@@ -198,11 +204,13 @@ function StatBox({
         className="text-[9px] font-medium uppercase tracking-widest"
         style={{ color: "var(--text-3)" }}
       >
-        {label}
+        {props.label}
       </div>
-      <div className="mt-0.5 font-display text-[16px] leading-tight">{value}</div>
+      <div className="mt-0.5 font-display text-[16px] leading-tight">
+        {props.value}
+      </div>
       <div className="mt-0.5 text-[10px]" style={{ color: "var(--text-3)" }}>
-        {sub}
+        {props.sub}
       </div>
     </div>
   );
