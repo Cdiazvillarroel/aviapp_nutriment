@@ -25,6 +25,7 @@ type NavItem = {
 const NAV_PRIMARY: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: IconLayout },
   { href: "/farms",     label: "Farms",     icon: IconHome },
+  { href: "/flocks",    label: "Flocks",    icon: IconHome },
   { href: "/visits",    label: "Visits",    icon: IconClock },
   { href: "/scoring",   label: "Scoring",   icon: IconCheckSquare },
 ];
@@ -47,7 +48,6 @@ export function Sidebar({ userName, userRole, clientName, todayVisitCount }: Sid
       className="sticky top-0 flex h-screen flex-col overflow-hidden text-text-inv"
       style={{ background: "var(--green-900)", width: "240px" }}
     >
-      {/* Brand */}
       <div className="flex items-center gap-2.5 border-b px-5 py-4"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
         <div className="relative h-7 w-7 flex-shrink-0 rounded-full"
@@ -63,7 +63,6 @@ export function Sidebar({ userName, userRole, clientName, todayVisitCount }: Sid
         </div>
       </div>
 
-      {/* User */}
       <div className="flex items-center gap-2.5 border-b px-5 py-3.5"
            style={{ borderColor: "rgba(255,255,255,0.06)" }}>
         <div className="flex h-8 w-8 items-center justify-center rounded-full text-[13px] font-medium"
@@ -76,7 +75,6 @@ export function Sidebar({ userName, userRole, clientName, todayVisitCount }: Sid
         </div>
       </div>
 
-      {/* Client selector (read-only for now; clickable later for switching) */}
       <div className="border-b px-5 py-3 text-[11px] uppercase tracking-wider opacity-55"
            style={{ borderColor: "rgba(255,255,255,0.06)" }}>
         Client
@@ -85,7 +83,6 @@ export function Sidebar({ userName, userRole, clientName, todayVisitCount }: Sid
         </strong>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-3">
         {NAV_PRIMARY.map(({ href, label, icon: Icon }) => (
           <NavLink key={href} href={href} active={isActive(href)}>
@@ -125,7 +122,6 @@ export function Sidebar({ userName, userRole, clientName, todayVisitCount }: Sid
         </NavLink>
       </nav>
 
-      {/* Sign-out */}
       <form action={signOut} className="border-t p-3"
             style={{ borderColor: "rgba(255,255,255,0.06)" }}>
         <button type="submit"
