@@ -12,6 +12,7 @@ import { ScoreCircles } from "./score-circles";
 import { SexToggle } from "./sex-toggle";
 import { NumericInput } from "./numeric-input";
 import { PhotoCapture } from "./photo-capture";
+import { AIAssistPanel } from "./ai-assist-panel";
 import { IconCheckSquare, IconHome } from "@/components/ui/icons";
 
 interface Definition {
@@ -438,6 +439,16 @@ export function ScoringClient({
                     onScoreChange={(v) => saveScore(activeFlockId, activeBird, d, { score: v })}
                     onNumericChange={(v) => saveScore(activeFlockId, activeBird, d, { numericValue: v })}
                     onSexChange={(v) => saveScore(activeFlockId, activeBird, d, { textValue: v })}
+                    onAIAccept={(score, scoreText) => {
+                      if (d.field_type === "score") {
+                        setCell(activeFlockId, activeBird, d.id, { score: score, status: "saved" });
+                      } else if (d.field_type === "numeric") {
+                        setCell(activeFlockId, activeBird, d.id, { numericValue: score, status: "saved" });
+                      } else if (d.field_type === "sex") {
+                        setCell(activeFlockId, activeBird, d.id, { textValue: scoreText, status: "saved" });
+                      }
+                      setTimeout(() => setCell(activeFlockId, activeBird, d.id, { status: "idle" }), 1200);
+                    }}
                   />
                 );
               })}
@@ -450,7 +461,7 @@ export function ScoringClient({
 }
 
 function ScoreItemRow({
-  visitId, flockId, birdNumber, definition, cell, onScoreChange, onNumericChange, onSexChange,
+  visitId, flockId, birdNumber, definition, cell, onScoreChange, onNumericChange, onSexChange, onAIAccept,
 }: {
   visitId: string;
   flockId: string;
@@ -460,80 +471,99 @@ function ScoreItemRow({
   onScoreChange: (value: number | null) => void;
   onNumericChange: (value: number | null) => void;
   onSexChange: (value: string | null) => void;
+  onAIAccept: (score: number, scoreText: string) => void;
 }) {
   const supportsPhoto = definition.field_type === "score";
   const startAt = definition.name === "Bursa Meter" ? 1 : 0;
+  const hasPhoto = cell.photos.length > 0;
 
   return (
     <div
-      className="grid items-center gap-4 border-b px-5 py-4 last:border-b-0"
-      style={{
-        borderColor: "var(--divider)",
-        gridTemplateColumns: "1.4fr auto 1.5fr 80px",
-      }}
+      className="border-b px-5 py-4 last:border-b-0"
+      style={{ borderColor: "var(--divider)" }}
     >
-      <div>
-        <div className="text-[13px] font-medium">{definition.name}</div>
-        <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
+      <div
+        className="grid items-center gap-4"
+        style={{ gridTemplateColumns: "1.4fr auto 1.5fr 80px" }}
+      >
+        <div>
+          <div className="text-[13px] font-medium">{definition.name}</div>
+          <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
+            {definition.field_type === "score" && (
+              <>
+                {startAt} = healthy · {definition.scale_max} = severe
+              </>
+            )}
+            {definition.field_type === "numeric" && "grams"}
+            {definition.field_type === "sex" && "Male / Female"}
+          </div>
+        </div>
+
+        <div>
           {definition.field_type === "score" && (
-            <>
-              {startAt} = healthy · {definition.scale_max} = severe
-            </>
+            <ScoreCircles
+              scaleMax={definition.scale_max}
+              startAt={startAt}
+              currentScore={cell.score}
+              onChange={onScoreChange}
+              disabled={cell.status === "saving"}
+            />
           )}
-          {definition.field_type === "numeric" && "grams"}
-          {definition.field_type === "sex" && "Male / Female"}
+          {definition.field_type === "numeric" && (
+            <NumericInput
+              current={cell.numericValue}
+              unit="g"
+              onChange={onNumericChange}
+              disabled={cell.status === "saving"}
+            />
+          )}
+          {definition.field_type === "sex" && (
+            <SexToggle
+              current={cell.textValue}
+              onChange={onSexChange}
+              disabled={cell.status === "saving"}
+            />
+          )}
+        </div>
+
+        <div>
+          {supportsPhoto ? (
+            <PhotoCapture
+              visitId={visitId}
+              visitScoreId={cell.scoreId}
+              onScoreNeeded={async () => null}
+              initialPhotos={cell.photos}
+            />
+          ) : null}
+        </div>
+
+        <div className="text-right text-[11px]" style={{ color: cell.status === "error" ? "var(--bad)" : "var(--text-3)" }}>
+          {cell.status === "saving" && "Saving…"}
+          {cell.status === "saved" && (
+            <span style={{ color: "var(--ok)" }}>✓ Saved</span>
+          )}
+          {cell.status === "error" && (cell.errorMsg ?? "Error")}
+          {cell.status === "idle" &&
+            (cell.score !== null || cell.numericValue !== null || cell.textValue !== null) && (
+              <span style={{ color: "var(--text-3)" }}>Saved</span>
+            )}
         </div>
       </div>
 
-      <div>
-        {definition.field_type === "score" && (
-          <ScoreCircles
-            scaleMax={definition.scale_max}
-            startAt={startAt}
-            currentScore={cell.score}
-            onChange={onScoreChange}
-            disabled={cell.status === "saving"}
-          />
-        )}
-        {definition.field_type === "numeric" && (
-          <NumericInput
-            current={cell.numericValue}
-            unit="g"
-            onChange={onNumericChange}
-            disabled={cell.status === "saving"}
-          />
-        )}
-        {definition.field_type === "sex" && (
-          <SexToggle
-            current={cell.textValue}
-            onChange={onSexChange}
-            disabled={cell.status === "saving"}
-          />
-        )}
-      </div>
-
-      <div>
-        {supportsPhoto ? (
-          <PhotoCapture
+      {/* AI Assist Panel — only when score row exists and has photo */}
+      {cell.scoreId && hasPhoto ? (
+        <div className="mt-3 ml-0">
+          <AIAssistPanel
             visitId={visitId}
-            visitScoreId={cell.scoreId}
-            onScoreNeeded={async () => null}
-            initialPhotos={cell.photos}
+            definitionId={definition.id}
+            flockId={flockId}
+            birdNumber={birdNumber}
+            hasPhoto={hasPhoto}
+            currentScore={cell.score}
+            onAccept={onAIAccept}
           />
-        ) : null}
-      </div>
-
-      <div className="text-right text-[11px]" style={{ color: cell.status === "error" ? "var(--bad)" : "var(--text-3)" }}>
-        {cell.status === "saving" && "Saving…"}
-        {cell.status === "saved" && (
-          <span style={{ color: "var(--ok)" }}>✓ Saved</span>
-        )}
-        {cell.status === "error" && (cell.errorMsg ?? "Error")}
-        {cell.status === "idle" &&
-          (cell.score !== null || cell.numericValue !== null || cell.textValue !== null) && (
-            <span style={{ color: "var(--text-3)" }}>Saved</span>
-          )}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
