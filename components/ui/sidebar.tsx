@@ -79,13 +79,13 @@ export function Sidebar(props: SidebarProps) {
       className="sticky top-0 flex h-screen flex-col overflow-hidden text-text-inv"
       style={{ background: "var(--green-900)", width: "240px" }}
     >
-      <div className="flex items-center gap-2.5 border-b px-5 py-4"
+      <div className="flex items-center gap-3 border-b px-5 py-5"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-        <div className="relative h-9 w-9 flex-shrink-0">
+        <div className="relative h-12 w-12 flex-shrink-0">
           <img
             src="/logo.png"
             alt="Poultry Health Monitor"
-            className="h-9 w-9 object-contain"
+            className="h-full w-full object-contain"
           />
         </div>
         <div className="font-display text-[15px] font-medium leading-tight">
