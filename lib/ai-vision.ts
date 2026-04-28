@@ -16,15 +16,19 @@ interface RequestParams {
   scaleMin: number;
   scaleMax: number;
   fieldType: "score" | "numeric" | "sex";
-  scaleDescription?: string;
   feedback?: string;
   previousScore?: number;
 }
 
 function buildPrompt(p: RequestParams): string {
-  const scaleHint = p.scaleDescription
-    ? `Reference scale:\n${p.scaleDescription}\n`
-    : `Score range: ${p.scaleMin} to ${p.scaleMax} (higher = more severe).`;
+  let scaleHint = "";
+  if (p.fieldType === "score") {
+    scaleHint = `Score range: ${p.scaleMin} (healthy/none) to ${p.scaleMax} (most severe). Use only integers in this range.`;
+  } else if (p.fieldType === "numeric") {
+    scaleHint = `This is a numeric measurement (e.g. body weight in grams). Provide the value as an integer.`;
+  } else if (p.fieldType === "sex") {
+    scaleHint = `This is a sex determination. Output "M" for male or "F" for female.`;
+  }
 
   let feedbackBlock = "";
   if (p.feedback && p.feedback.trim() !== "") {
