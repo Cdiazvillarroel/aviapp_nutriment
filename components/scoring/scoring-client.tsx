@@ -550,18 +550,31 @@ function ScoreItemRow({
         </div>
       </div>
 
-      {/* AI Assist Panel — only when score row exists and has photo */}
-      {cell.scoreId && hasPhoto ? (
-        <div className="mt-3 ml-0">
-          <AIAssistPanel
-            visitId={visitId}
-            definitionId={definition.id}
-            flockId={flockId}
-            birdNumber={birdNumber}
-            hasPhoto={hasPhoto}
-            currentScore={cell.score}
-            onAccept={onAIAccept}
-          />
+      {/* AI Assist Panel — debug version, shows for all score items */}
+      {definition.field_type === "score" ? (
+        <div className="mt-3">
+          {cell.scoreId && hasPhoto ? (
+            <AIAssistPanel
+              visitId={visitId}
+              definitionId={definition.id}
+              flockId={flockId}
+              birdNumber={birdNumber}
+              hasPhoto={hasPhoto}
+              currentScore={cell.score}
+              onAccept={onAIAccept}
+            />
+          ) : (
+            <div
+              className="rounded-md px-3 py-2 text-[10px] font-mono"
+              style={{
+                background: "var(--surface-2)",
+                color: "var(--text-3)",
+                border: "1px dashed var(--divider)",
+              }}
+            >
+              [debug] scoreId: {cell.scoreId ?? "null"} · photos: {cell.photos.length} · hasPhoto: {String(hasPhoto)}
+            </div>
+          )}
         </div>
       ) : null}
     </div>
