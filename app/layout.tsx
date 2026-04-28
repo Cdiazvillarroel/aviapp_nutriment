@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nutriment Portal",
-  description: "Poultry health management for Australian broiler operations.",
+  title: "Poultry Health Monitor",
+  description: "Comprehensive poultry health management for veterinarians and producers",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
