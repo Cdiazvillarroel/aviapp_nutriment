@@ -56,9 +56,9 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
     // Get the most recent photo for this score from the photos table
     const { data: photoRows, error: photoErr } = await supabase
       .from("photos")
-      .select("storage_path")
+      .select("id, storage_path")
       .eq("visit_score_id", scoreRow.id)
-      .order("created_at", { ascending: false })
+      .order("uploaded_at", { ascending: false })
       .limit(1);
 
     if (photoErr) return { ok: false, error: "Could not load photos: " + photoErr.message };
@@ -66,13 +66,13 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
       return { ok: false, error: "No photo uploaded for this item. Please upload a photo first." };
     }
 
-    const photoPath = photoRows[0].storage_path;
+    const photo = photoRows[0];
 
     // Get a signed URL for the photo
     const { data: signed, error: signErr } = await supabase
       .storage
       .from("visit-photos")
-      .createSignedUrl(photoPath, 60 * 5);
+      .createSignedUrl(photo.storage_path, 60 * 5);
 
     if (signErr || !signed?.signedUrl) {
       return { ok: false, error: "Could not generate photo URL: " + (signErr?.message ?? "unknown") };
@@ -98,6 +98,12 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
       feedback: payload.feedback,
       previousScore: payload.previousScore,
     });
+
+    // Mark the photo as AI-processed (audit trail)
+    await supabase
+      .from("photos")
+      .update({ ai_processed_at: new Date().toISOString() })
+      .eq("id", photo.id);
 
     // Log the AI call for cost tracking and audit
     await supabase.from("ai_assist_calls").insert({
