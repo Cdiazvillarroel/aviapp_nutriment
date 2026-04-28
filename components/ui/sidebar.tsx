@@ -81,15 +81,17 @@ export function Sidebar(props: SidebarProps) {
     >
       <div className="flex items-center gap-2.5 border-b px-5 py-4"
            style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-        <div className="relative h-7 w-7 flex-shrink-0 rounded-full"
-             style={{ background: "var(--surface)" }}>
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full"
-                style={{ background: "var(--orange-500)" }} />
+        <div className="relative h-9 w-9 flex-shrink-0">
+          <img
+            src="/logo.png"
+            alt="Poultry Health Monitor"
+            className="h-9 w-9 object-contain"
+          />
         </div>
-        <div className="font-display text-[17px] font-medium leading-tight">
-          Nutriment
-          <span className="block text-[10px] uppercase tracking-[0.16em] opacity-65 font-normal">
-            Health
+        <div className="font-display text-[15px] font-medium leading-tight">
+          Poultry Health
+          <span className="block text-[9px] uppercase tracking-[0.16em] opacity-65 font-normal">
+            Monitor App
           </span>
         </div>
       </div>
