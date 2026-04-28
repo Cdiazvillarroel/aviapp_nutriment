@@ -37,11 +37,12 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
       .single();
     if (!membership) return { ok: false, error: "No client membership" };
 
+    // Look up the score row + definition
     const { data: scoreRow, error: scoreErr } = await supabase
       .from("visit_scores")
       .select(`
-        id, photo_path, score,
-        scoring_definitions(name, module, scale_min, scale_max, field_type, scale_description)
+        id, score,
+        scoring_definitions(name, module, scale_max, field_type)
       `)
       .eq("visit_id", payload.visitId)
       .eq("definition_id", payload.definitionId)
@@ -50,16 +51,27 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
       .maybeSingle();
 
     if (scoreErr) return { ok: false, error: scoreErr.message };
-    if (!scoreRow) return { ok: false, error: "Score row not found. Please save the row first." };
+    if (!scoreRow) return { ok: false, error: "Score row not found. Please save the row first by entering a score." };
 
-    const photoPath = scoreRow.photo_path;
-    if (!photoPath || photoPath.trim() === "") {
+    // Get the most recent photo for this score from the photos table
+    const { data: photoRows, error: photoErr } = await supabase
+      .from("photos")
+      .select("storage_path")
+      .eq("visit_score_id", scoreRow.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (photoErr) return { ok: false, error: "Could not load photos: " + photoErr.message };
+    if (!photoRows || photoRows.length === 0) {
       return { ok: false, error: "No photo uploaded for this item. Please upload a photo first." };
     }
 
+    const photoPath = photoRows[0].storage_path;
+
+    // Get a signed URL for the photo
     const { data: signed, error: signErr } = await supabase
       .storage
-      .from("scoring-photos")
+      .from("visit-photos")
       .createSignedUrl(photoPath, 60 * 5);
 
     if (signErr || !signed?.signedUrl) {
@@ -72,19 +84,22 @@ export async function requestAIAssist(payload: RequestPayload): Promise<AIAssist
     if (!def) return { ok: false, error: "Scoring definition not found" };
 
     const fieldType = (def.field_type ?? "score") as "score" | "numeric" | "sex";
+    const scaleMax = def.scale_max ?? 5;
+    // Bursa Meter starts at 1, everything else at 0
+    const scaleMin = def.name === "Bursa Meter" ? 1 : 0;
 
     const suggestion = await requestAIScore({
       imageUrl: signed.signedUrl,
       itemName: def.name,
       module: def.module ?? "Other",
-      scaleMin: def.scale_min ?? 0,
-      scaleMax: def.scale_max ?? 5,
+      scaleMin: scaleMin,
+      scaleMax: scaleMax,
       fieldType: fieldType,
-      scaleDescription: def.scale_description ?? undefined,
       feedback: payload.feedback,
       previousScore: payload.previousScore,
     });
 
+    // Log the AI call for cost tracking and audit
     await supabase.from("ai_assist_calls").insert({
       client_id: membership.client_id,
       user_id: user.id,
