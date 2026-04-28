@@ -21,13 +21,16 @@ export default async function LoginPage({
              }} />
 
         <div className="relative z-10 flex items-center gap-3">
-          <div className="relative h-9 w-9 rounded-full" style={{ background: "var(--surface)" }}>
-            <span className="absolute right-1 top-1 h-3 w-3 rounded-full"
-                  style={{ background: "var(--orange-500)" }} />
+          <div className="relative h-11 w-11 flex-shrink-0">
+            <img
+              src="/logo.png"
+              alt="Poultry Health Monitor"
+              className="h-11 w-11 object-contain"
+            />
           </div>
           <div className="font-display text-lg font-medium leading-tight">
-            Nutriment
-            <span className="block text-[10px] uppercase tracking-[0.16em] opacity-60">Health</span>
+            Poultry Health
+            <span className="block text-[10px] uppercase tracking-[0.16em] opacity-60">Monitor App</span>
           </div>
         </div>
 
@@ -44,7 +47,7 @@ export default async function LoginPage({
           <div className="mt-7 border-t pt-4 text-xs leading-relaxed opacity-60"
                style={{ borderColor: "rgba(255,255,255,0.1)" }}>
             Australian-licensed feed additives · APVMA-aligned reporting · designed for VIC broiler operations.
-            <br />Nutriment Health Pty Ltd · Bendigo, Victoria
+            <br />Poultry Health Monitor · Bendigo, Victoria
           </div>
         </div>
       </aside>
@@ -76,7 +79,7 @@ export default async function LoginPage({
               Work email
             </span>
             <input className="input" name="email" type="email" required
-                   placeholder="diaz@nutriment.com.au" autoComplete="email" />
+                   placeholder="you@yourcompany.com" autoComplete="email" />
           </label>
 
           <label className="block">
@@ -112,7 +115,7 @@ export default async function LoginPage({
 
         <div className="mt-10 flex items-center justify-between border-t pt-6 text-[11px]"
              style={{ borderColor: "var(--divider)", color: "var(--text-3)" }}>
-          <span>v0.1.0 · Nutriment Portal</span>
+          <span>v0.1.0 · Poultry Health Monitor</span>
           <span className="space-x-2">
             <Link href="#">Privacy</Link>·<Link href="#">Terms</Link>
           </span>
