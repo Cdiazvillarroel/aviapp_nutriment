@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { upsertScore } from "@/app/(app)/scoring/actions";
 import { ScoreCircles } from "../score-circles";
@@ -69,6 +70,8 @@ export function MobileScoringClient({
   definitions,
   initialScores,
 }: Props) {
+  const router = useRouter();
+
   const initialMap = new Map<string, CellState>();
   for (const s of initialScores) {
     initialMap.set(key(s.flockId, s.birdNumber, s.definitionId), {
@@ -87,7 +90,6 @@ export function MobileScoringClient({
   const [activeBird, setActiveBird] = useState<number>(1);
   const [, startTransition] = useTransition();
 
-  // Order modules
   const moduleNames: string[] = [];
   const seen = new Set<string>();
   const sortedDefs = [...definitions].sort(
@@ -164,6 +166,14 @@ export function MobileScoringClient({
     });
   }
 
+  // Compute global save state - any cell currently saving means we're saving
+  let isSavingAny = false;
+  let hasError = false;
+  for (const c of scoreMap.values()) {
+    if (c.status === "saving") isSavingAny = true;
+    if (c.status === "error") hasError = true;
+  }
+
   // Total progress
   let totalDone = 0;
   let totalCells = 0;
@@ -183,6 +193,14 @@ export function MobileScoringClient({
 
   const activeDefinitions = itemsByModule.get(activeModule) ?? [];
 
+  function handleBack() {
+    if (isSavingAny) {
+      alert("Please wait — still saving last changes.");
+      return;
+    }
+    router.push("/scoring/mobile");
+  }
+
   return (
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
       {/* Top bar */}
@@ -190,13 +208,15 @@ export function MobileScoringClient({
         className="sticky top-0 z-20 flex items-center gap-3 border-b px-3 py-2.5"
         style={{ background: "var(--surface)", borderColor: "var(--divider)" }}
       >
-        <Link
-          href={`/visits/${visitId}`}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-[14px]"
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-[14px]"
           style={{ color: "var(--text-2)", background: "var(--surface-2)" }}
+          aria-label="Back to visits"
         >
           ←
-        </Link>
+        </button>
         <div className="flex-1 min-w-0">
           <div className="truncate text-[14px] font-medium leading-tight"
                style={{ color: "var(--text-1)" }}>
@@ -210,13 +230,18 @@ export function MobileScoringClient({
           </div>
           {activeFlock && (
             <div className="text-[11px]" style={{ color: "var(--text-3)" }}>
-              Day {activeFlock.age_days}
+              Day {activeFlock.age_days} · {totalDone}/{totalCells} items
             </div>
           )}
         </div>
-        <div className="flex-shrink-0 text-[11px] font-mono tabular-nums"
-             style={{ color: "var(--text-3)" }}>
-          {totalDone}/{totalCells}
+        <div className="flex-shrink-0 text-[11px] font-medium tabular-nums">
+          {hasError ? (
+            <span style={{ color: "var(--bad)" }}>⚠ Error</span>
+          ) : isSavingAny ? (
+            <span style={{ color: "var(--orange-500)" }}>Saving…</span>
+          ) : (
+            <span style={{ color: "var(--ok)" }}>✓ All saved</span>
+          )}
         </div>
       </header>
 
@@ -289,7 +314,7 @@ export function MobileScoringClient({
             <p className="m-0 mb-3 text-[13px]" style={{ color: "var(--text-2)" }}>
               No flocks attached to this visit.
             </p>
-            <Link href={`/visits/${visitId}/edit`} className="btn btn--primary">
+            <Link href={`/visits/${visitId}/edit?desktop=1`} className="btn btn--primary">
               Attach flocks
             </Link>
           </div>
