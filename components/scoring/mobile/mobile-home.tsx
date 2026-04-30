@@ -216,4 +216,18 @@ export function MobileHome(props: Props) {
           className="text-[13px] font-medium"
           style={{ color: "var(--green-700)" }}
         >
-          Use de
+          Use desktop version →
+        </Link>
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="text-[13px]"
+            style={{ color: "var(--text-3)" }}
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
