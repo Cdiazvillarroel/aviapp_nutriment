@@ -1,7 +1,5 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentClientId } from "@/lib/auth";
-import { upsertScore, uploadPhoto } from "../../[visitId]/score/actions";
 import { MobileScoringClient } from "@/components/scoring/mobile/mobile-scoring-client";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +11,20 @@ export default async function MobileScoringPage({
 }) {
   const { visitId } = await params;
   const supabase = await createClient();
-  const clientId = await getCurrentClientId();
 
-  if (!clientId) redirect("/login");
+  // Get current user and their client
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: membership } = await supabase
+    .from("client_members")
+    .select("client_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .single();
+
+  if (!membership) redirect("/login");
+  const clientId = membership.client_id;
 
   // Load visit
   const { data: visit, error: visitError } = await supabase
@@ -43,33 +52,40 @@ export default async function MobileScoringPage({
     .eq("visit_id", visit.id);
 
   const flocks = (visitFlocks ?? [])
-    .map(function (vf) { return (vf as any).flocks; })
+    .map((vf) => {
+      const fl = Array.isArray((vf as any).flocks) ? (vf as any).flocks[0] : (vf as any).flocks;
+      return fl;
+    })
     .filter(Boolean);
 
   // Load scoring definitions
   const { data: definitions } = await supabase
     .from("scoring_definitions")
-    .select("*")
+    .select("id, name, scale_max, module, module_order, order_in_module, field_type")
     .order("module_order")
     .order("order_in_module");
 
   // Load existing scores for this visit
   const { data: scores } = await supabase
     .from("visit_scores")
-    .select("*")
-    .eq("visit_id", visit.id);
+    .select("id, score, numeric_value, text_value, flock_id, bird_number, definition_id")
+    .eq("visit_id", visitId);
 
-  // Load photo flags
-  const { data: photos } = await supabase
-    .from("photos")
-    .select("visit_score_id")
-    .in("visit_score_id", (scores ?? []).map(function (s) { return s.id; }));
+  // Check which scores have photos
+  const scoreIds = (scores ?? []).map((s) => s.id);
+  let photoSet = new Set<string>();
+  if (scoreIds.length > 0) {
+    const { data: photos } = await supabase
+      .from("photos")
+      .select("visit_score_id")
+      .in("visit_score_id", scoreIds);
+    photoSet = new Set((photos ?? []).map((p) => p.visit_score_id));
+  }
 
-  const photoSet = new Set((photos ?? []).map(function (p) { return p.visit_score_id; }));
-
-  const scoresWithPhoto = (scores ?? []).map(function (s) {
-    return { ...s, has_photo: photoSet.has(s.id) };
-  });
+  const scoresWithPhoto = (scores ?? []).map((s) => ({
+    ...s,
+    has_photo: photoSet.has(s.id),
+  }));
 
   return (
     <MobileScoringClient
@@ -78,8 +94,6 @@ export default async function MobileScoringPage({
       flocks={flocks as any}
       scoringDefinitions={(definitions ?? []) as any}
       existingScores={scoresWithPhoto as any}
-      upsertScore={upsertScore}
-      uploadPhoto={uploadPhoto}
     />
   );
 }
