@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { signOut } from "@/app/(auth)/login/actions";
 
 export interface VisitListItem {
   id: string;
@@ -211,22 +212,8 @@ export function MobileHome(props: Props) {
         style={{ borderColor: "var(--divider)", color: "var(--text-3)" }}
       >
         <Link
-          href="/dashboard"
+          href="/dashboard?desktop=1"
           className="text-[13px] font-medium"
           style={{ color: "var(--green-700)" }}
         >
-          Use desktop version →
-        </Link>
-        <form action="/api/auth/signout" method="POST">
-          <button
-            type="submit"
-            className="text-[13px]"
-            style={{ color: "var(--text-3)" }}
-          >
-            Sign out
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
+          Use de
