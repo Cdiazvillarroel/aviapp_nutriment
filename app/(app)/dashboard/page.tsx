@@ -5,6 +5,7 @@ import { AlertsPanel } from "@/components/dashboard/alerts-panel";
 import { TodayVisits } from "@/components/dashboard/today-visits";
 import { MortalityChart } from "@/components/dashboard/mortality-chart";
 import { ScoringTrends } from "@/components/dashboard/scoring-trends";
+import { MobileRedirect } from "@/components/ui/mobile-redirect";
 import type { Alert, Visit } from "@/lib/types";
 
 const VIC_BENCHMARK_PCT = 0.28; // Mortality benchmark for VIC broiler avg
@@ -145,6 +146,7 @@ export default async function DashboardPage() {
 
   return (
     <>
+      <MobileRedirect />
       <Topbar crumbs={[{ label: "Dashboard" }]} hasNotifications={openAlerts > 0} />
 
       <div className="w-full max-w-[1280px] px-8 pb-14 pt-7">
