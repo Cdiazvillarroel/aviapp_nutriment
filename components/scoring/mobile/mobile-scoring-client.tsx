@@ -283,6 +283,7 @@ export function MobileScoringClient(props: Props) {
 
     try {
       const result = await savePhotoLocal({
+        visitId: props.visitId,
         visitScoreId: cell.scoreId,
         blob: file,
       });
