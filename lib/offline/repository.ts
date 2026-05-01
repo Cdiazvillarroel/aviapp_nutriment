@@ -168,8 +168,13 @@ export async function saveVisitScoreLocal(input: {
 /**
  * Save a photo taken offline.
  * Stores blob in IndexedDB and queues upload mutation.
+ *
+ * IMPORTANT: visitId is required because the Supabase Storage RLS policy
+ * for the visit-photos bucket checks that the first folder of the path is
+ * a valid visit_id. Without it, uploads fail silently.
  */
 export async function savePhotoLocal(input: {
+  visitId: string;
   visitScoreId: string;
   blob: Blob;
 }): Promise<{ photoId: string }> {
@@ -196,10 +201,11 @@ export async function savePhotoLocal(input: {
   };
   await idbPut(STORES.photos, photoRow);
 
-  // Queue upload mutation
+  // Queue upload mutation (visitId required for RLS path)
   await queueMutation("upload_photo", {
     photoId,
     blobId,
+    visitId: input.visitId,
     visitScoreId: input.visitScoreId,
   });
 
