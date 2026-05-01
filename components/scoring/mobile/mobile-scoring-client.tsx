@@ -79,6 +79,12 @@ export function MobileScoringClient(props: Props) {
   const isOnline = useOnlineStatus();
   const pendingCount = usePendingMutations();
 
+  // Avoid hydration mismatch: useOnlineStatus and usePendingMutations read
+  // navigator.onLine and IndexedDB, which don't exist on the server.
+  // We only render the connection indicator after the client has mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // State for visit data — starts from server props, overridden if loaded from IndexedDB
   const [visitData, setVisitData] = useState({
     farmName: props.visitFarmName,
@@ -404,17 +410,19 @@ export function MobileScoringClient(props: Props) {
           )}
         </div>
         <div className="flex-shrink-0 text-[11px] font-medium tabular-nums">
-          {!isOnline ? (
-            <span style={{ color: "var(--orange-500)" }}>● Offline</span>
-          ) : pendingCount > 0 ? (
-            <span style={{ color: "var(--orange-500)" }}>{pendingCount} pending</span>
-          ) : isSavingAny ? (
-            <span style={{ color: "var(--orange-500)" }}>Saving…</span>
-          ) : hasError ? (
-            <span style={{ color: "var(--bad)" }}>⚠ Error</span>
-          ) : (
-            <span style={{ color: "var(--ok)" }}>✓ Saved</span>
-          )}
+          {mounted ? (
+            !isOnline ? (
+              <span style={{ color: "var(--orange-500)" }}>● Offline</span>
+            ) : pendingCount > 0 ? (
+              <span style={{ color: "var(--orange-500)" }}>{pendingCount} pending</span>
+            ) : isSavingAny ? (
+              <span style={{ color: "var(--orange-500)" }}>Saving…</span>
+            ) : hasError ? (
+              <span style={{ color: "var(--bad)" }}>⚠ Error</span>
+            ) : (
+              <span style={{ color: "var(--ok)" }}>✓ Saved</span>
+            )
+          ) : null}
         </div>
       </header>
 
