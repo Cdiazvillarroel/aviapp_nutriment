@@ -253,14 +253,34 @@ async function flushUpsertScore(payload: any): Promise<void> {
 
 async function flushUploadPhoto(payload: any): Promise<void> {
   const supabase = createClient();
-  const blobRow = await getBlob(payload.blobId);
-  if (!blobRow) {
-    throw new Error("Local blob not found (already uploaded?)");
+
+  // Get the current user for uploaded_by
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error("Not authenticated — cannot upload photo");
   }
 
-  // Upload blob to Supabase Storage
+  const blobRow = await getBlob(payload.blobId);
+  if (!blobRow) {
+    // Blob already deleted means upload succeeded earlier and the mutation
+    // was orphaned. Just succeed so the queue can clear it.
+    console.warn(`[sync] Blob ${payload.blobId} not found, treating as already uploaded`);
+    return;
+  }
+
+  // CRITICAL: path MUST start with visit_id (not visit_score_id) because
+  // the RLS policy on storage.objects checks foldername[1] = visit_id
+  if (!payload.visitId) {
+    throw new Error(
+      `Photo mutation missing visitId in payload (got ${JSON.stringify(payload)}). ` +
+      `Old mutations queued before the fix won't have it — clear pending changes and retry.`
+    );
+  }
+
   const ext = blobRow.mime_type.includes("png") ? "png" : "jpg";
-  const path = `${payload.visitScoreId}/${payload.photoId}.${ext}`;
+  const path = `${payload.visitId}/${payload.photoId}.${ext}`;
+
+  console.log(`[sync] Uploading photo to ${path}`);
 
   const { error: uploadError } = await supabase.storage
     .from("visit-photos")
@@ -270,6 +290,7 @@ async function flushUploadPhoto(payload: any): Promise<void> {
     });
 
   if (uploadError) {
+    console.error(`[sync] Storage upload failed:`, uploadError);
     throw new Error(`Upload failed: ${uploadError.message}`);
   }
 
@@ -279,11 +300,17 @@ async function flushUploadPhoto(payload: any): Promise<void> {
     .insert({
       visit_score_id: payload.visitScoreId,
       storage_path: path,
+      uploaded_by: user.id,
     });
 
   if (insertError) {
+    console.error(`[sync] Photo metadata insert failed:`, insertError);
+    // Try to clean up the orphaned storage object so we don't leave garbage
+    await supabase.storage.from("visit-photos").remove([path]).catch(() => {});
     throw new Error(`Photo metadata insert failed: ${insertError.message}`);
   }
+
+  console.log(`[sync] Photo uploaded successfully: ${path}`);
 
   // Cleanup local blob
   await deleteBlob(payload.blobId);
