@@ -22,8 +22,10 @@ import {
   updateMutation,
   getBlob,
   deleteBlob,
+  getLocalRecording,
+  deleteRecording,
 } from "./repository";
-import { setMeta } from "./db";
+import { setMeta, idbPut, STORES, type OfflineRecording } from "./db";
 import { upsertScore } from "@/app/(app)/scoring/actions";
 import { emitPendingChanged } from "./use-online-status";
 
@@ -217,6 +219,10 @@ export async function syncPendingMutations(
         await flushUploadPhoto(mutation.payload);
         await deleteMutation(mutation.id);
         result.succeeded++;
+      } else if (mutation.type === "upload_recording") {
+        await flushUploadRecording(mutation.payload);
+        await deleteMutation(mutation.id);
+        result.succeeded++;
       }
     } catch (e: any) {
       result.failed++;
@@ -314,4 +320,102 @@ async function flushUploadPhoto(payload: any): Promise<void> {
 
   // Cleanup local blob
   await deleteBlob(payload.blobId);
+}
+
+// NEW (Phase 1b): upload audio recording to Supabase Storage + insert metadata.
+// Pattern is similar to flushUploadPhoto but for the visit-recordings bucket.
+async function flushUploadRecording(payload: any): Promise<void> {
+  const supabase = createClient();
+
+  // Get the current user for recorded_by
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error("Not authenticated — cannot upload recording");
+  }
+
+  if (!payload.visitId) {
+    throw new Error(
+      `Recording mutation missing visitId in payload (got ${JSON.stringify(payload)}).`
+    );
+  }
+
+  const blobRow = await getBlob(payload.blobId);
+  if (!blobRow) {
+    console.warn(`[sync] Recording blob ${payload.blobId} not found, treating as already uploaded`);
+    return;
+  }
+
+  // Path: visit_id is the first folder (RLS requirement)
+  const ext = mimeTypeToExt(blobRow.mime_type);
+  const path = `${payload.visitId}/${payload.recordingId}.${ext}`;
+
+  console.log(
+    `[sync] Uploading recording to ${path} ` +
+    `(${(blobRow.blob.size / 1024 / 1024).toFixed(1)} MB, ` +
+    `${payload.durationSeconds}s)`
+  );
+
+  const { error: uploadError } = await supabase.storage
+    .from("visit-recordings")
+    .upload(path, blobRow.blob, {
+      contentType: blobRow.mime_type,
+      upsert: true,
+    });
+
+  if (uploadError) {
+    console.error(`[sync] Recording storage upload failed:`, uploadError);
+    throw new Error(`Recording upload failed: ${uploadError.message}`);
+  }
+
+  // Insert metadata row
+  const { data: insertedRow, error: insertError } = await supabase
+    .from("visit_recordings")
+    .insert({
+      visit_id: payload.visitId,
+      storage_path: path,
+      duration_seconds: payload.durationSeconds,
+      file_size_bytes: payload.fileSizeBytes,
+      mime_type: blobRow.mime_type,
+      recorded_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (insertError) {
+    console.error(`[sync] Recording metadata insert failed:`, insertError);
+    await supabase.storage.from("visit-recordings").remove([path]).catch(() => {});
+    throw new Error(`Recording metadata insert failed: ${insertError.message}`);
+  }
+
+  console.log(`[sync] Recording uploaded successfully: ${path} (server id: ${insertedRow.id})`);
+
+  // Update local recording row with server data + remove _is_local flag
+  const localRecording = await getLocalRecording(payload.recordingId);
+  if (localRecording) {
+    const updated: OfflineRecording = {
+      ...localRecording,
+      // Replace local id with server id so future reads match the server
+      id: insertedRow.id,
+      storage_path: path,
+      _is_local: false,
+      _is_active: false,
+      _local_blob_id: undefined,
+    };
+    // Remove the old local-id row, write the new server-id row
+    await deleteRecording(payload.recordingId);
+    await idbPut(STORES.recordings, updated);
+  }
+
+  // Cleanup local blob
+  await deleteBlob(payload.blobId);
+}
+
+// Map a MIME type to a sensible file extension for storage path
+function mimeTypeToExt(mimeType: string): string {
+  const lower = mimeType.toLowerCase();
+  if (lower.includes("webm")) return "webm";
+  if (lower.includes("mp4")) return "mp4";
+  if (lower.includes("ogg")) return "ogg";
+  if (lower.includes("mpeg") || lower.includes("mp3")) return "mp3";
+  return "webm"; // safe default
 }
