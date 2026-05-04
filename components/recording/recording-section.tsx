@@ -22,6 +22,11 @@ interface Props {
 }
 
 export function RecordingSection({ visitId, farmId, isOnline }: Props) {
+  // Defensive: if no farmId is known (e.g. we're in the offline fallback mode
+  // where the server query never ran), don't render anything. Recording isn't
+  // possible without knowing which farm we're on.
+  if (!farmId) return null;
+
   const consent = useFarmerConsent({ farmId, isOnline });
   const [modalOpen, setModalOpen] = useState(false);
   const [savingConsent, setSavingConsent] = useState(false);
