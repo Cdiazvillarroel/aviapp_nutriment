@@ -20,6 +20,8 @@ import {
   usePendingMutations,
   emitPendingChanged,
 } from "@/lib/offline/use-online-status";
+import { RecordingSection } from "@/components/recording/recording-section";
+import { RecoveryPrompt } from "@/components/recording/recovery-prompt";
 
 interface Definition {
   id: string;
@@ -53,6 +55,7 @@ export interface InitialScore {
 interface Props {
   visitId: string;
   visitFarmName: string;
+  farmId: string;
   birdCount: number;
   flocks: Flock[];
   definitions: Definition[];
@@ -425,6 +428,23 @@ export function MobileScoringClient(props: Props) {
           ) : null}
         </div>
       </header>
+
+      {/* Recovery prompt for interrupted recordings (only renders if applicable) */}
+      {mounted && <RecoveryPrompt visitId={props.visitId} />}
+
+      {/* Recording controls — consent gate handled inside RecordingSection */}
+      {mounted && (
+        <div
+          className="flex items-center justify-end px-3 py-2"
+          style={{ background: "var(--surface)", borderBottom: "1px solid var(--divider)" }}
+        >
+          <RecordingSection
+            visitId={props.visitId}
+            farmId={props.farmId}
+            isOnline={isOnline}
+          />
+        </div>
+      )}
 
       {/* Bird selector */}
       <div className="sticky top-[57px] z-20 flex items-center gap-2 overflow-x-auto px-3 py-2.5"
