@@ -5,13 +5,14 @@
 // plus a mutation queue for offline writes.
 //
 // Architecture:
-//  - "data" store: mirror of server data (visits, flocks, scoring_definitions, visit_scores, photos)
+//  - "data" stores: mirror of server data (visits, flocks, scoring_definitions, visit_scores, photos, recordings)
 //  - "mutations" store: pending writes that will be flushed when online
-//  - "blobs" store: binary data (photos taken offline, pending upload)
+//  - "blobs" store: binary data (photos and audio recordings awaiting upload)
 //  - "meta" store: sync timestamps, app state
 
 const DB_NAME = "nutriflock";
-const DB_VERSION = 1;
+// VERSION 2: added "recordings" store (Phase 1b — voice recording feature)
+const DB_VERSION = 2;
 
 // Object store names
 export const STORES = {
@@ -22,9 +23,10 @@ export const STORES = {
   visit_flocks: "visit_flocks",
   farms: "farms",
   photos: "photos",          // metadata of photos
-  blobs: "blobs",            // binary blobs of photos awaiting upload
-  mutations: "mutations",     // pending writes queue
-  meta: "meta",               // sync timestamps, etc.
+  recordings: "recordings",  // metadata of audio recordings (added in v2)
+  blobs: "blobs",            // binary blobs of photos AND audio awaiting upload
+  mutations: "mutations",    // pending writes queue
+  meta: "meta",              // sync timestamps, etc.
 } as const;
 
 // Types matching Supabase shapes (subset we care about for offline)
@@ -94,18 +96,35 @@ export interface OfflinePhoto {
   _is_local?: boolean;
 }
 
+// NEW in v2: audio recording of a visit session.
+export interface OfflineRecording {
+  id: string;                  // server uuid OR local temp id
+  visit_id: string;
+  storage_path: string;        // server path, empty if pending
+  duration_seconds: number;    // updated periodically while recording
+  file_size_bytes: number;     // updated periodically while recording
+  mime_type: string;
+  recorded_at: string;         // when recording started
+  // Local-only fields
+  _local_blob_id?: string;     // points to blobs store while pending upload
+  _is_local?: boolean;         // true if not yet on server
+  _is_active?: boolean;        // true while recording is in progress (not yet stopped)
+}
+
 export interface OfflineBlob {
-  id: string;                  // matches OfflinePhoto._local_blob_id
+  id: string;                  // matches OfflinePhoto._local_blob_id or OfflineRecording._local_blob_id
   blob: Blob;
   mime_type: string;
-  visit_score_id: string;
+  // Optional: only set for photo blobs. Audio recording blobs leave this undefined.
+  visit_score_id?: string;
   created_at: string;
 }
 
 // Mutation types — what kind of write was queued
 export type MutationType =
   | "upsert_score"
-  | "upload_photo";
+  | "upload_photo"
+  | "upload_recording";       // NEW in v2
 
 export interface PendingMutation {
   id: string;                  // ULID-like timestamp+random
@@ -131,7 +150,11 @@ export function openDB(): Promise<IDBDatabase> {
 
     req.onupgradeneeded = (event) => {
       const db = req.result;
+      // Note: oldVersion lets us tell first install (0) from upgrade (1 → 2)
+      const oldVersion = event.oldVersion;
+      console.log(`[idb] Upgrading from v${oldVersion} to v${DB_VERSION}`);
 
+      // === v1 stores (also created here on first install) ===
       if (!db.objectStoreNames.contains(STORES.visits)) {
         const store = db.createObjectStore(STORES.visits, { keyPath: "id" });
         store.createIndex("by_status", "status");
@@ -169,6 +192,12 @@ export function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: "key" });
+      }
+
+      // === v2: recordings store ===
+      if (!db.objectStoreNames.contains(STORES.recordings)) {
+        const store = db.createObjectStore(STORES.recordings, { keyPath: "id" });
+        store.createIndex("by_visit", "visit_id");
       }
     };
   });
