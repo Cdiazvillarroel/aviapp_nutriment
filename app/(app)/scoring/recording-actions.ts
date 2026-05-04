@@ -107,10 +107,30 @@ export interface ListedRecording {
   expiresAt: string;
   /** Signed URL for the audio file. null if audio has been deleted (>30 days). */
   signedUrl: string | null;
-  /** Transcript text, populated in Phase 2. */
+  /** Transcript text, populated by the process-recording edge function. */
   transcript: string | null;
   transcriptProcessedAt: string | null;
-  hasAiSummary: boolean;
+  /** Structured AI summary (Claude output). */
+  aiSummary: AISummaryShape | null;
+  /** Processing pipeline state. */
+  processingStatus: "pending" | "processing" | "succeeded" | "failed";
+  processingError: string | null;
+  processingAttempts: number;
+  processingStartedAt: string | null;
+  processingCompletedAt: string | null;
+}
+
+export interface AISummaryShape {
+  summary: string;
+  key_findings: string[];
+  mentioned_scores: Array<{
+    bird_number: number | null;
+    indicator: string;
+    score: number | string | null;
+    quote: string;
+  }>;
+  concerns: string[];
+  language: string;
 }
 
 export type ListRecordingsResult =
@@ -134,7 +154,9 @@ export async function listVisitRecordings(input: {
     .select(
       `id, storage_path, duration_seconds, file_size_bytes, mime_type,
        recorded_at, recorded_by, audio_deleted_at, expires_at,
-       transcript, transcript_processed_at, ai_summary`
+       transcript, transcript_processed_at, ai_summary,
+       processing_status, processing_error, processing_attempts,
+       processing_started_at, processing_completed_at`
     )
     .eq("visit_id", input.visitId)
     .order("recorded_at", { ascending: false });
@@ -174,10 +196,46 @@ export async function listVisitRecordings(input: {
         signedUrl,
         transcript: r.transcript,
         transcriptProcessedAt: r.transcript_processed_at,
-        hasAiSummary: !!r.ai_summary,
+        aiSummary: r.ai_summary as AISummaryShape | null,
+        processingStatus: r.processing_status as ListedRecording["processingStatus"],
+        processingError: r.processing_error,
+        processingAttempts: r.processing_attempts ?? 0,
+        processingStartedAt: r.processing_started_at,
+        processingCompletedAt: r.processing_completed_at,
       };
     })
   );
 
   return { ok: true, recordings };
+}
+
+// =====================================================================
+// TRIGGER AI PROCESSING (manual retry from desktop)
+// =====================================================================
+
+export type TriggerProcessingResult =
+  | { ok: true; status: string }
+  | { ok: false; error: string };
+
+/**
+ * Manually trigger the process-recording edge function for a given recording.
+ * Used by the "Retry" button in the UI when processing previously failed,
+ * or when initial fire-and-forget invocation from sync.ts was missed.
+ */
+export async function triggerRecordingProcessing(input: {
+  recordingId: string;
+}): Promise<TriggerProcessingResult> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.functions.invoke("process-recording", {
+    body: { recordingId: input.recordingId },
+  });
+
+  if (error) {
+    console.error("[trigger] Edge function error:", error);
+    return { ok: false, error: error.message };
+  }
+
+  // Edge function returns 202 with { ok: true, status: 'processing' }
+  return { ok: true, status: data?.status ?? "processing" };
 }
