@@ -408,6 +408,28 @@ async function flushUploadRecording(payload: any): Promise<void> {
 
   // Cleanup local blob
   await deleteBlob(payload.blobId);
+
+  // Trigger AI processing (transcription + summary) — fire-and-forget.
+  // The edge function returns 202 immediately and processes in the background.
+  // If this call fails, the recording stays in 'pending' status and can be
+  // retried manually from the desktop UI.
+  try {
+    const { error: invokeError } = await supabase.functions.invoke(
+      "process-recording",
+      { body: { recordingId: insertedRow.id } },
+    );
+    if (invokeError) {
+      console.warn(
+        `[sync] Failed to trigger AI processing for ${insertedRow.id}:`,
+        invokeError,
+      );
+    } else {
+      console.log(`[sync] AI processing triggered for ${insertedRow.id}`);
+    }
+  } catch (e) {
+    // Don't fail the upload if processing trigger fails
+    console.warn(`[sync] Could not invoke process-recording function:`, e);
+  }
 }
 
 // Map a MIME type to a sensible file extension for storage path
