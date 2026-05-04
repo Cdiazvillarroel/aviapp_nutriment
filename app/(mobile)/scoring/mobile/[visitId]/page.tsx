@@ -123,6 +123,7 @@ export default async function MobileScoringPage({
       <MobileScoringClient
         visitId={visitId}
         visitFarmName={farm?.name ?? "Unknown farm"}
+        farmId={visit.farm_id}
         birdCount={visit.bird_count ?? 5}
         flocks={flocks}
         definitions={definitions}
