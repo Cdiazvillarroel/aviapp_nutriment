@@ -19,6 +19,7 @@ import {
   type OfflineVisitFlock,
   type OfflineFarm,
   type OfflinePhoto,
+  type OfflineRecording,
   type OfflineBlob,
   type PendingMutation,
   type MutationType,
@@ -58,6 +59,15 @@ export async function getLocalVisitFlocks(visitId: string): Promise<OfflineVisit
 
 export async function getLocalPhotosForScore(visitScoreId: string): Promise<OfflinePhoto[]> {
   return idbGetByIndex<OfflinePhoto>(STORES.photos, "by_visit_score", visitScoreId);
+}
+
+// NEW (Phase 1b): list and get audio recordings for a visit
+export async function getLocalRecordingsForVisit(visitId: string): Promise<OfflineRecording[]> {
+  return idbGetByIndex<OfflineRecording>(STORES.recordings, "by_visit", visitId);
+}
+
+export async function getLocalRecording(id: string): Promise<OfflineRecording | null> {
+  return idbGet<OfflineRecording>(STORES.recordings, id);
 }
 
 // Composite read: assemble a full "visit detail" payload for the mobile scoring page
@@ -213,6 +223,141 @@ export async function savePhotoLocal(input: {
 }
 
 // =====================================================================
+// AUDIO RECORDINGS (Phase 1b)
+//
+// Lifecycle:
+//   1. initRecordingLocal()         — when recording starts
+//   2. updateRecordingLocal()       — every 60s during recording (snapshot)
+//   3. commitRecordingLocal()       — when user stops recording (queues upload)
+//
+// IDs are stable across the recording session: a single recordingId and
+// blobId are used from start to finish. If Safari kills the page mid-recording,
+// the latest snapshot persists in IndexedDB and can be recovered.
+// =====================================================================
+
+/**
+ * Begin a new local recording. Returns IDs to use throughout the session.
+ * Does NOT yet persist any audio (no blob exists yet at this point).
+ * Does NOT enqueue any mutation (we wait until commit).
+ */
+export async function initRecordingLocal(input: {
+  visitId: string;
+  mimeType: string;
+}): Promise<{ recordingId: string; blobId: string }> {
+  const recordingId = generateLocalId("rec");
+  const blobId = generateLocalId("blob");
+
+  const recordingRow: OfflineRecording = {
+    id: recordingId,
+    visit_id: input.visitId,
+    storage_path: "",
+    duration_seconds: 0,
+    file_size_bytes: 0,
+    mime_type: input.mimeType,
+    recorded_at: new Date().toISOString(),
+    _local_blob_id: blobId,
+    _is_local: true,
+    _is_active: true,
+  };
+  await idbPut(STORES.recordings, recordingRow);
+
+  return { recordingId, blobId };
+}
+
+/**
+ * Snapshot the current state of an in-progress recording.
+ * Called periodically (every 60s) to ensure data is persisted in case of crash.
+ * Overwrites the existing blob (we always store the full Blob from start to now,
+ * because WebM/Opus chunks aren't independently valid — they need the container
+ * header from the first chunk).
+ */
+export async function updateRecordingLocal(input: {
+  recordingId: string;
+  blobId: string;
+  blob: Blob;
+  durationSeconds: number;
+}): Promise<void> {
+  // Overwrite the blob (same id)
+  const blobRow: OfflineBlob = {
+    id: input.blobId,
+    blob: input.blob,
+    mime_type: input.blob.type || "audio/webm",
+    created_at: new Date().toISOString(),
+  };
+  await idbPut(STORES.blobs, blobRow);
+
+  // Update recording metadata
+  const existing = await idbGet<OfflineRecording>(STORES.recordings, input.recordingId);
+  if (!existing) {
+    throw new Error(`Recording ${input.recordingId} not found in IndexedDB`);
+  }
+
+  const updated: OfflineRecording = {
+    ...existing,
+    duration_seconds: input.durationSeconds,
+    file_size_bytes: input.blob.size,
+  };
+  await idbPut(STORES.recordings, updated);
+}
+
+/**
+ * Finalize a recording: persist the final blob and enqueue upload.
+ * After this call, the sync engine will pick it up next time online.
+ */
+export async function commitRecordingLocal(input: {
+  recordingId: string;
+  blobId: string;
+  visitId: string;
+  blob: Blob;
+  durationSeconds: number;
+}): Promise<void> {
+  // Final snapshot (same logic as update)
+  const blobRow: OfflineBlob = {
+    id: input.blobId,
+    blob: input.blob,
+    mime_type: input.blob.type || "audio/webm",
+    created_at: new Date().toISOString(),
+  };
+  await idbPut(STORES.blobs, blobRow);
+
+  const existing = await idbGet<OfflineRecording>(STORES.recordings, input.recordingId);
+  if (!existing) {
+    throw new Error(`Recording ${input.recordingId} not found in IndexedDB`);
+  }
+
+  // Mark as no longer active (recording stopped)
+  const updated: OfflineRecording = {
+    ...existing,
+    duration_seconds: input.durationSeconds,
+    file_size_bytes: input.blob.size,
+    _is_active: false,
+  };
+  await idbPut(STORES.recordings, updated);
+
+  // Queue upload mutation
+  await queueMutation("upload_recording", {
+    recordingId: input.recordingId,
+    blobId: input.blobId,
+    visitId: input.visitId,
+    durationSeconds: input.durationSeconds,
+    fileSizeBytes: input.blob.size,
+    mimeType: input.blob.type || "audio/webm",
+  });
+}
+
+/**
+ * Discard a recording (e.g. user cancels mid-session).
+ * Removes the metadata and blob. Does NOT queue any mutation.
+ */
+export async function discardRecordingLocal(input: {
+  recordingId: string;
+  blobId: string;
+}): Promise<void> {
+  await idbDelete(STORES.recordings, input.recordingId);
+  await idbDelete(STORES.blobs, input.blobId);
+}
+
+// =====================================================================
 // MUTATION QUEUE
 // =====================================================================
 
@@ -277,10 +422,18 @@ export async function bulkPutPhotos(photos: OfflinePhoto[]): Promise<void> {
   await idbPutMany(STORES.photos, photos);
 }
 
+export async function bulkPutRecordings(recordings: OfflineRecording[]): Promise<void> {
+  await idbPutMany(STORES.recordings, recordings);
+}
+
 export async function getBlob(blobId: string): Promise<OfflineBlob | null> {
   return idbGet<OfflineBlob>(STORES.blobs, blobId);
 }
 
 export async function deleteBlob(blobId: string): Promise<void> {
   await idbDelete(STORES.blobs, blobId);
+}
+
+export async function deleteRecording(recordingId: string): Promise<void> {
+  await idbDelete(STORES.recordings, recordingId);
 }
