@@ -38,7 +38,7 @@ export default async function MobileScoringPage({
       supabase
         .from("visits")
         .select(`
-          id, status, scheduled_at, coccidiostat, other_treatment, bird_count,
+          id, status, scheduled_at, coccidiostat, other_treatment, bird_count, farm_id,
           farms(name),
           visit_flocks(
             flocks(id, reference, placement_date, breeds(name), houses(name))
@@ -138,12 +138,18 @@ export default async function MobileScoringPage({
 /**
  * Fallback when server data load fails (offline, auth expired, etc.).
  * The MobileScoringClient component handles loading from IndexedDB on its own.
+ *
+ * In this mode the farmId is not known on the server (we never reached the
+ * query), so we pass an empty string. The RecordingSection inside will detect
+ * this and hide the recording controls — which is the correct behavior, since
+ * recording requires online consent verification anyway.
  */
 function OfflineFallback({ visitId }: { visitId: string }) {
   return (
     <MobileScoringClient
       visitId={visitId}
       visitFarmName=""
+      farmId=""
       birdCount={5}
       flocks={[]}
       definitions={[]}
