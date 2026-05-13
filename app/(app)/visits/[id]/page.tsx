@@ -103,11 +103,12 @@ export default async function VisitDetailPage({
   const totalScores = rawScores.length;
 
   const scoreMatrix = new Map<string, Array<{
-    bird_number: number;
-    score: number | null;
-    numeric_value: number | null;
-    text_value: string | null;
-  }>>();
+  bird_number: number;
+  score: number | null;
+  numeric_value: number | null;
+  text_value: string | null;
+  source?: "manual" | "voice_ai";
+}>>();
 
   for (const s of rawScores) {
     const key = s.definition_id + "|" + (s.flock_id ?? "");
