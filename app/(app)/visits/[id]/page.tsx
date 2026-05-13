@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Topbar } from "@/components/ui/topbar";
 import { VisitScoresList, type ScoreItem } from "@/components/visits/visit-scores-list";
+import { VisitRecordingsSection } from "@/components/visits/visit-recordings-section";
+import { AISuggestionsReview } from "@/components/visits/ai-suggestions-review";
 import { IconHome, IconCheckSquare, IconClock } from "@/components/ui/icons";
 
 export default async function VisitDetailPage({
@@ -23,7 +25,7 @@ export default async function VisitDetailPage({
 
   const clientId = membership!.client_id;
 
-  const [visitRes, definitionsRes, scoresRes] = await Promise.all([
+  const [visitRes, definitionsRes, scoresRes, recordingsRes, suggestionsRes] = await Promise.all([
     supabase
       .from("visits")
       .select(`
@@ -46,6 +48,23 @@ export default async function VisitDetailPage({
       .from("visit_scores")
       .select("id, score, numeric_value, text_value, flock_id, bird_number, definition_id")
       .eq("visit_id", id),
+    supabase
+      .from("visit_recordings")
+      .select("id, recorded_at, duration_seconds, file_size_bytes, storage_path, audio_deleted_at, processing_status, processing_error, transcript, ai_summary")
+      .eq("visit_id", id)
+      .order("recorded_at", { ascending: false }),
+    supabase
+      .from("ai_score_suggestions")
+      .select(`
+        id, recording_id, bird_number,
+        suggested_score, suggested_numeric, suggested_text,
+        quote, conflicts_with_score_id,
+        existing_score_value, existing_numeric_value, existing_text_value,
+        scoring_definitions(id, name, module, field_type, scale_max)
+      `)
+      .eq("visit_id", id)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true }),
   ]);
 
   if (!visitRes.data) notFound();
@@ -130,6 +149,26 @@ export default async function VisitDetailPage({
       if (def && def.scale_max >= 3) criticalCount += 1;
     }
   }
+
+  const recordings = recordingsRes.data ?? [];
+  const suggestions = (suggestionsRes.data ?? []).map(function (s: any) {
+    return {
+      id: s.id,
+      recording_id: s.recording_id,
+      bird_number: s.bird_number,
+      definition: Array.isArray(s.scoring_definitions)
+        ? s.scoring_definitions[0]
+        : s.scoring_definitions,
+      suggested_score: s.suggested_score,
+      suggested_numeric: s.suggested_numeric,
+      suggested_text: s.suggested_text,
+      quote: s.quote,
+      conflicts_with_score_id: s.conflicts_with_score_id,
+      existing_score_value: s.existing_score_value,
+      existing_numeric_value: s.existing_numeric_value,
+      existing_text_value: s.existing_text_value,
+    };
+  });
 
   const visitDate = new Date(visit.scheduled_at);
   const dateStr = visitDate.toLocaleDateString("en-AU", {
@@ -251,6 +290,35 @@ export default async function VisitDetailPage({
             ) : (
               <VisitScoresList items={scoreItems} />
             )}
+
+            {/* Voice recordings section */}
+            {recordings.length > 0 ? (
+              <div className="mt-8">
+                <h2
+                  className="mb-3 font-display text-[16px] font-medium m-0"
+                  style={{ fontVariationSettings: "'opsz' 32" }}
+                >
+                  🎤 Voice recordings
+                </h2>
+                <VisitRecordingsSection
+                  visitId={visit.id}
+                  initialRecordings={recordings as any}
+                />
+              </div>
+            ) : null}
+
+            {/* AI suggestions to review */}
+            {suggestions.length > 0 ? (
+              <div className="mt-8">
+                <h2
+                  className="mb-3 font-display text-[16px] font-medium m-0"
+                  style={{ fontVariationSettings: "'opsz' 32" }}
+                >
+                  AI suggestions to review
+                </h2>
+                <AISuggestionsReview suggestions={suggestions} />
+              </div>
+            ) : null}
           </div>
 
           <aside className="space-y-4">
