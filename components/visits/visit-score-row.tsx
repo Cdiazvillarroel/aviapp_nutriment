@@ -7,6 +7,7 @@ export interface BirdScore {
   score: number | null;
   numeric_value: number | null;
   text_value: string | null;
+  source?: "manual" | "voice_ai";
 }
 
 interface Props {
@@ -44,6 +45,9 @@ export function VisitScoreRow(props: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const { defName, module, flockReference, fieldType, scaleMax, startAt, birdScores, totalBirds, unit } = props;
+
+  // Count how many bird scores in this group came from voice
+  const voiceCount = birdScores.filter(function (b) { return b.source === "voice_ai"; }).length;
 
   let aggregateLabel: React.ReactNode;
   let aggregateMeta: string;
@@ -165,11 +169,23 @@ export function VisitScoreRow(props: Props) {
         />
 
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">{defName}</div>
+          <div className="flex items-center gap-1.5 text-[13px] font-medium">
+            <span>{defName}</span>
+            {voiceCount > 0 ? (
+              <span
+                className="text-[10px]"
+                style={{ opacity: 0.7 }}
+                aria-label={voiceCount + " score(s) from voice"}
+              >
+                🎤
+              </span>
+            ) : null}
+          </div>
           <div className="text-[10px]" style={{ color: "var(--text-3)" }}>
             {module}
             {flockReference ? " · " + flockReference : ""}
             {" · " + aggregateMeta}
+            {voiceCount > 0 ? " · " + voiceCount + " from voice" : ""}
           </div>
         </div>
 
@@ -243,6 +259,15 @@ export function VisitScoreRow(props: Props) {
                   Bird {b.bird_number}
                 </span>
                 {chip}
+                {b.source === "voice_ai" ? (
+                  <span
+                    className="text-[9px]"
+                    style={{ opacity: 0.6 }}
+                    aria-label="score from voice"
+                  >
+                    🎤
+                  </span>
+                ) : null}
               </div>
             );
           })}
