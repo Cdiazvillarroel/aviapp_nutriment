@@ -46,7 +46,7 @@ export default async function VisitDetailPage({
       .order("order_in_module"),
     supabase
       .from("visit_scores")
-      .select("id, score, numeric_value, text_value, flock_id, bird_number, definition_id")
+      .select("id, score, numeric_value, text_value, flock_id, bird_number, definition_id, source")
       .eq("visit_id", id),
     supabase
       .from("visit_recordings")
@@ -113,11 +113,12 @@ export default async function VisitDetailPage({
     const key = s.definition_id + "|" + (s.flock_id ?? "");
     if (!scoreMatrix.has(key)) scoreMatrix.set(key, []);
     scoreMatrix.get(key)!.push({
-      bird_number: s.bird_number ?? 1,
-      score: s.score,
-      numeric_value: s.numeric_value,
-      text_value: s.text_value,
-    });
+  bird_number: s.bird_number ?? 1,
+  score: s.score,
+  numeric_value: s.numeric_value,
+  text_value: s.text_value,
+  source: (s as any).source ?? "manual",
+});
   }
 
   const scoreItems: ScoreItem[] = [];
